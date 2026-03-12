@@ -4,6 +4,7 @@ import { where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
+import { DepartmentLogo } from '../components/DepartmentLogo';
 import { useErrorModal } from '../components/ErrorModal';
 import { GlassCard, GradientBackground, ScrollContainer, StatCard } from '../components/ui/kit';
 import { logoutUser } from '../firebase/authService';
@@ -86,38 +87,54 @@ const StudentDashboard = () => {
   };
 
   const loadData = async () => {
-    // Double guard: Prevent queries without user.uid and ensure student role
     if (!user?.uid || role !== 'student') {
       setLoading(false);
       return;
     }
 
     try {
-      // Get current session
       const currentSession = await getCurrentSession();
+      const { getDocument } = await import('../firebase/firestoreService');
 
-      // Find student by uid
-      const studentsList = await queryCollection(
+      // Find student by uid first
+      let studentsList = await queryCollection(
         'students',
-        where('uid', '==', user?.uid)
+        where('uid', '==', user.uid)
       ) as Student[];
 
+      // Fallback: if no student by uid, try by rollNo from user doc (e.g. after registration before sync)
+      if (studentsList.length === 0 && (user as any).rollNo) {
+        const byRoll = await queryCollection(
+          'students',
+          where('rollNo', '==', String((user as any).rollNo).trim())
+        ) as Student[];
+        if (byRoll.length > 0) {
+          studentsList = byRoll;
+        }
+      }
+
+      // Merge user profile so we always have name, email, rollNo for display
+      const userProfile = {
+        name: user.name,
+        email: user.email,
+        rollNo: (user as any).rollNo,
+        phone: (user as any).phone,
+      };
+
       if (studentsList.length === 0) {
-        console.error('Student not found');
+        setStudentData({ ...userProfile, id: undefined } as Student);
+        setLoading(false);
         return;
       }
 
       const student = studentsList[0];
-      setStudentData(student);
+      setStudentData({ ...userProfile, ...student });
 
-      // Get class data
       if (student.classId) {
-        const { getDocument } = await import('../firebase/firestoreService');
         const classDoc = await getDocument('classes', student.classId) as ClassDoc | null;
         setClassData(classDoc);
       }
 
-      // Get subjects for this class
       if (student.classId) {
         const subjectsList = await queryCollection(
           'subjects',
@@ -127,8 +144,7 @@ const StudentDashboard = () => {
         setStats(prev => ({ ...prev, totalSubjects: subjectsList.length }));
       }
 
-      // Get attendance records for this student
-      const rollNo = student.rollNo || student.rollNumber;
+      const rollNo = student.rollNo || student.rollNumber || (user as any).rollNo;
       if (rollNo && student.classId) {
         const attendanceList = await queryCollection(
           'attendance',
@@ -136,10 +152,9 @@ const StudentDashboard = () => {
           where('sessionId', '==', currentSession?.id)
         ) as AttendanceDoc[];
 
-        // Filter attendance where student is present or absent
         const studentAttendance = attendanceList.filter(att => {
-          const present = att.presentStudents?.includes(rollNo) || false;
-          const absent = att.absentStudents?.includes(rollNo) || false;
+          const present = att.presentStudents?.includes(String(rollNo)) || false;
+          const absent = att.absentStudents?.includes(String(rollNo)) || false;
           return present || absent;
         });
 
@@ -177,28 +192,49 @@ const StudentDashboard = () => {
 
   return (
     <GradientBackground padded={false}>
-      <ScrollContainer contentClassName="px-4 sm:px-6 pt-6 pb-12 gap-5">
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-1">
-            <Text className="text-xs text-gray-500 uppercase tracking-wide mb-1">Welcome back</Text>
-            <Text className="text-2xl font-bold text-gray-900">{user?.name || studentData?.name || 'Student'}</Text>
-            <Text className="text-sm text-gray-600 mt-1">View your attendance records and academic information</Text>
+      <ScrollContainer contentClassName="px-4 sm:px-6 lg:px-8 pt-4 pb-12 gap-6 max-w-wide w-full mx-auto">
+        <View className="mb-4 gap-2">
+          <View className="flex-row items-center justify-between gap-3">
+            <DepartmentLogo size={64} />
+            <View className="flex-1 min-w-0">
+              <Text className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-0.5">Welcome back</Text>
+              <Text className="text-xl font-bold text-neutral-900" numberOfLines={1}>{user?.name || studentData?.name || 'Student'}</Text>
+            </View>
+            <TouchableOpacity onPress={handleLogout} className="rounded-xl border border-neutral-200 px-4 py-2.5 bg-white flex-row items-center gap-2 shrink-0">
+              <Ionicons name="log-out-outline" size={18} color="#52525b" />
+              <Text className="text-sm font-semibold text-neutral-700">Logout</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            onPress={handleLogout}
-            className="rounded-xl border border-gray-300 px-4 py-2 bg-white flex-row items-center gap-2"
-          >
-            <Ionicons name="log-out-outline" size={16} color="#374151" />
-            <Text className="text-sm font-semibold text-gray-700">Logout</Text>
-          </TouchableOpacity>
         </View>
 
+        {/* Personal info: compact block */}
+        <GlassCard className="p-4">
+          <View className="flex-row">
+          <View className="flex-1">
+              <Text className="text-xs text-neutral-500 mb-0.5">Department</Text>
+              <Text className="text-sm font-semibold text-neutral-900" numberOfLines={1}>{(user as any)?.department || 'DCSE'}</Text>
+            </View>
+            <View className="flex-1">
+              <Text className="text-xs text-neutral-500 mb-0.5">Role</Text>
+              <Text className="text-sm font-semibold text-neutral-900">Student</Text>
+            </View>
+          </View>
+          <View className="flex-row mt-3 pt-3 border-t border-neutral-100">
+            
+            <View className="flex-1 pr-3">
+              <Text className="text-xs text-neutral-500 mb-0.5">Email</Text>
+              <Text className="text-sm font-semibold text-neutral-900" numberOfLines={1}>{user?.email || '—'}</Text>
+            </View>
+          </View>
+        </GlassCard>
+
+        {/* Non-personal: StatCards */}
         <View className="flex-row flex-wrap gap-3">
           <StatCard
             label="Class"
-            value={classData ? `${classData.name} ${classData.section || ''}`.trim() : 'N/A'}
+            value={classData ? `${classData.name} ${classData.section || ''}`.trim() : (studentData?.classId ? 'Loading…' : 'Not assigned')}
             icon={<Ionicons name="school-outline" size={20} color="#2563eb" />}
-            accent="bg-blue-50"
+            accent="bg-primary-50"
           />
           <StatCard
             label="Subjects"
@@ -206,49 +242,47 @@ const StudentDashboard = () => {
             icon={<Ionicons name="book-outline" size={20} color="#059669" />}
             accent="bg-emerald-50"
           />
-          {/* <StatCard
-            label="Records"
-            value={stats.attendanceRecords}
-            icon={<Ionicons name="calendar-outline" size={20} color="#d97706" />}
-            accent="bg-amber-50"
-          /> */}
         </View>
 
-        <GlassCard className="p-4">
-          <TouchableOpacity
-            onPress={() => router.push('/student/notifications')}
-            activeOpacity={0.7}
-            className="flex-row items-center justify-between mb-3"
-          >
-            <View className="flex-row items-center gap-3 flex-1">
-              <View className="w-10 h-10 rounded-xl items-center justify-center bg-purple-50">
-                <Ionicons name="notifications-outline" size={20} color="#7c3aed" />
+        <GlassCard className="p-5">
+          <TouchableOpacity onPress={() => router.push('/student/assignments')} activeOpacity={0.8} className="flex-row items-center justify-between mb-4 py-1">
+            <View className="flex-row items-center gap-4 flex-1 min-w-0">
+              <View className="w-12 h-12 rounded-xl items-center justify-center bg-amber-50">
+                <Ionicons name="document-text-outline" size={22} color="#d97706" />
               </View>
-              <View className="flex-1">
-                <Text className="text-base font-semibold text-gray-900">Notifications</Text>
-                <Text className="text-sm text-gray-500">Push notifications enabled</Text>
+              <View className="flex-1 min-w-0">
+                <Text className="text-base font-semibold text-neutral-900">Assignments</Text>
+                <Text className="text-sm text-neutral-500">View by subject</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+            <Ionicons name="chevron-forward" size={20} color="#a1a1aa" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/student/notifications')} activeOpacity={0.8} className="flex-row items-center justify-between py-1">
+            <View className="flex-row items-center gap-4 flex-1 min-w-0">
+              <View className="w-12 h-12 rounded-xl items-center justify-center bg-purple-50">
+                <Ionicons name="notifications-outline" size={22} color="#7c3aed" />
+              </View>
+              <View className="flex-1 min-w-0">
+                <Text className="text-base font-semibold text-neutral-900">Notifications</Text>
+                <Text className="text-sm text-neutral-500">Push enabled</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#a1a1aa" />
           </TouchableOpacity>
         </GlassCard>
 
-        <GlassCard className="p-4">
-          <TouchableOpacity
-            onPress={() => router.push('/student/attendance')}
-            activeOpacity={0.7}
-            className="flex-row items-center justify-between"
-          >
-            <View className="flex-row items-center gap-3 flex-1">
-              <View className="w-10 h-10 rounded-xl items-center justify-center bg-blue-50">
-                <Ionicons name="calendar-outline" size={20} color="#2563eb" />
+        <GlassCard className="p-5">
+          <TouchableOpacity onPress={() => router.push('/student/attendance')} activeOpacity={0.8} className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-4 flex-1 min-w-0">
+              <View className="w-12 h-12 rounded-xl items-center justify-center bg-primary-50">
+                <Ionicons name="calendar-outline" size={22} color="#2563eb" />
               </View>
-              <View className="flex-1">
-                <Text className="text-base font-semibold text-gray-900">View Attendance</Text>
-                <Text className="text-sm text-gray-500">View your attendance by subject and date</Text>
+              <View className="flex-1 min-w-0">
+                <Text className="text-base font-semibold text-neutral-900">View attendance</Text>
+                <Text className="text-sm text-neutral-500">By subject and date</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+            <Ionicons name="chevron-forward" size={20} color="#a1a1aa" />
           </TouchableOpacity>
         </GlassCard>
       </ScrollContainer>

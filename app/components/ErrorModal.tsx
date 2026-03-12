@@ -1,5 +1,14 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { Modal, Pressable, View, Text, TouchableOpacity } from 'react-native';
+import {
+  Modal as RNModal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 type ModalAction = {
   label: string;
@@ -33,31 +42,24 @@ type ErrorModalContextValue = {
 
 const ErrorModalContext = createContext<ErrorModalContextValue | undefined>(undefined);
 
-const getColorClasses = (type: ModalConfig['type']) => {
-  switch (type) {
-    case 'success':
-      return { accent: 'text-green-600', border: 'border-green-200', icon: '✅' };
-    case 'info':
-      return { accent: 'text-blue-600', border: 'border-blue-200', icon: 'ℹ️' };
-    case 'warning':
-      return { accent: 'text-amber-600', border: 'border-amber-200', icon: '⚠️' };
-    case 'error':
-    default:
-      return { accent: 'text-red-600', border: 'border-red-200', icon: '⚠️' };
-  }
+const ICON_MAP = {
+  error: { name: 'warning-outline' as const, bg: '#FEF2F2', icon: '#DC2626' },
+  success: { name: 'checkmark-circle-outline' as const, bg: '#F0FDF4', icon: '#16A34A' },
+  info: { name: 'information-circle-outline' as const, bg: '#EFF6FF', icon: '#2563EB' },
+  warning: { name: 'alert-circle-outline' as const, bg: '#FFFBEB', icon: '#D97706' },
 };
 
-const getButtonClasses = (variant: ModalAction['variant']) => {
+const getButtonStyle = (variant: ModalAction['variant']) => {
   switch (variant) {
     case 'secondary':
-      return 'bg-gray-100 text-gray-800';
+      return { bg: '#F4F4F5', text: '#27272A' };
     case 'danger':
-      return 'bg-red-600 text-white';
+      return { bg: '#DC2626', text: '#FFF' };
     case 'ghost':
-      return 'bg-transparent text-gray-600';
+      return { bg: 'transparent', text: '#52525B' };
     case 'primary':
     default:
-      return 'bg-blue-600 text-white';
+      return { bg: '#2563EB', text: '#FFF' };
   }
 };
 
@@ -71,14 +73,16 @@ export const ErrorModalProvider: React.FC<React.PropsWithChildren> = ({ children
   const showModal = useCallback(
     (modalConfig: ModalConfig) => {
       setConfig({
-        title: modalConfig.title ?? (modalConfig.type === 'success' ? 'Success' : 'Notice'),
+        title:
+          modalConfig.title ??
+          (modalConfig.type === 'success' ? 'Success' : modalConfig.type === 'error' ? 'Error' : 'Notice'),
         message: modalConfig.message ?? '',
         type: modalConfig.type ?? 'error',
         actions:
           modalConfig.actions ??
           [
             {
-              label: 'Close',
+              label: 'OK',
               variant: 'primary',
               onPress: hideModal,
             },
@@ -178,47 +182,134 @@ export const ErrorModalProvider: React.FC<React.PropsWithChildren> = ({ children
     [showModal, showError, showSuccess, showInfo, showConfirm, hideModal]
   );
 
-  const colorClasses = getColorClasses(config?.type);
+  const type = config?.type ?? 'error';
+  const iconStyle = ICON_MAP[type];
 
   return (
     <ErrorModalContext.Provider value={contextValue}>
       {children}
-      <Modal transparent visible={!!config} animationType="fade" onRequestClose={hideModal}>
-        <Pressable
-          className="flex-1 bg-black/50 items-center justify-center px-6"
-          onPress={config?.dismissOnBackdrop === false ? undefined : hideModal}
-        >
+      <RNModal
+        transparent
+        visible={!!config}
+        animationType="fade"
+        onRequestClose={hideModal}
+        statusBarTranslucent
+        supportedOrientations={['portrait', 'landscape']}
+        presentationStyle="overFullScreen"
+      >
+        <View style={[styles.wrapper, Platform.OS === 'web' && styles.wrapperWeb]}>
           <Pressable
-            className={`w-full max-w-sm rounded-2xl bg-white p-5 border ${colorClasses.border}`}
-            onPress={(event) => event.stopPropagation()}
+            style={styles.overlay}
+            onPress={config?.dismissOnBackdrop === false ? undefined : hideModal}
           >
-            <View className="flex-row items-center gap-3 mb-3">
-              <Text className={`text-2xl ${colorClasses.accent}`}>{colorClasses.icon}</Text>
-              <Text className="text-lg font-semibold text-gray-900 flex-1">{config?.title}</Text>
-            </View>
-            <Text className="text-gray-700 mb-5">{config?.message}</Text>
-            <View className="flex-row justify-end gap-2">
-              {(config?.actions ?? []).map((action, index) => (
-                <TouchableOpacity
-                  key={`${action.label}-${index}`}
-                  onPress={() => {
-                    action.onPress?.();
-                    if (action.onPress !== hideModal) {
-                      hideModal();
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-lg ${getButtonClasses(action.variant)}`}
-                >
-                  <Text className="font-semibold">{action.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Pressable
+              style={[styles.card, Platform.OS === 'web' && styles.cardWeb]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={[styles.iconWrap, { backgroundColor: iconStyle.bg }]}>
+                <Ionicons name={iconStyle.name} size={28} color={iconStyle.icon} />
+              </View>
+              <Text style={styles.title}>{config?.title}</Text>
+              <Text style={styles.message}>{config?.message}</Text>
+              <View style={styles.actions}>
+                {(config?.actions ?? []).map((action, index) => {
+                  const { bg, text } = getButtonStyle(action.variant);
+                  return (
+                    <TouchableOpacity
+                      key={`${action.label}-${index}`}
+                      onPress={() => {
+                        action.onPress?.();
+                        if (action.onPress !== hideModal) hideModal();
+                      }}
+                      style={[styles.button, { backgroundColor: bg }]}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.buttonText, { color: text }]}>{action.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </View>
+      </RNModal>
     </ErrorModalContext.Provider>
   );
 };
+
+const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+    elevation: 999,
+    zIndex: 9999,
+  },
+  wrapperWeb: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 2147483647,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFF',
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  cardWeb: {
+    maxWidth: 360,
+  },
+  iconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#18181B',
+    marginBottom: 8,
+  },
+  message: {
+    fontSize: 15,
+    color: '#52525B',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  button: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  buttonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+});
 
 export const useErrorModal = () => {
   const context = useContext(ErrorModalContext);
@@ -227,4 +318,3 @@ export const useErrorModal = () => {
   }
   return context;
 };
-

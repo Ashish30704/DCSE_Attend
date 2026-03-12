@@ -15,7 +15,6 @@ const ManageTeachers = () => {
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
-    id: '',
     email: '',
     phone: '',
   });
@@ -38,20 +37,21 @@ const ManageTeachers = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.name || !formData.id || !formData.email) {
-      showError('Please fill in all required fields');
+    if (!formData.name?.trim() || !formData.email?.trim()) {
+      showError('Please fill in name and email');
       return;
     }
 
     try {
+      const payload = { name: formData.name.trim(), email: formData.email.trim(), phone: formData.phone?.trim() || '' };
       if (editingTeacher) {
-        await updateDocument('teachers', editingTeacher.id, formData);
+        await updateDocument('teachers', editingTeacher.id, payload);
       } else {
-        await addDocument('teachers', formData);
+        await addDocument('teachers', payload);
       }
       setModalVisible(false);
       setEditingTeacher(null);
-      setFormData({ name: '', id: '', email: '', phone: '' });
+      setFormData({ name: '', email: '', phone: '' });
       loadTeachers();
     } catch (error) {
       showError('Failed to save teacher');
@@ -62,21 +62,20 @@ const ManageTeachers = () => {
     setEditingTeacher(teacher);
     setFormData({
       name: teacher.name || '',
-      id: teacher.id || '',
       email: teacher.email || '',
       phone: teacher.phone || '',
     });
     setModalVisible(true);
   };
 
-  const handleDelete = (teacherId) => {
+  const handleDelete = (teacherDocId: string) => {
     showConfirm({
       title: 'Delete Teacher',
       message: 'Are you sure you want to delete this teacher?',
       confirmLabel: 'Delete',
       onConfirm: async () => {
         try {
-          await deleteDocument('teachers', teacherId);
+          await deleteDocument('teachers', teacherDocId);
           loadTeachers();
         } catch (error) {
           showError('Failed to delete teacher');
@@ -95,11 +94,13 @@ const ManageTeachers = () => {
 
       // Import teachers one by one
       for (const row of data) {
+        const name = row['Name'] ?? row['name'];
+        const email = row['Email'] ?? row['email'];
+        if (!name || !email) continue;
         await addDocument('teachers', {
-          name: row['Name'] || row['name'],
-          id: row['Teacher ID'] || row['id'] || row['teacherId'],
-          email: row['Email'] || row['email'],
-          phone: row['Phone'] || row['phone'] || '',
+          name,
+          email,
+          phone: row['Phone'] ?? row['phone'] ?? '',
         });
       }
       showSuccess(`${data.length} teachers imported successfully`);
@@ -112,7 +113,6 @@ const ManageTeachers = () => {
   const handleExport = async () => {
     try {
       const exportData = teachers.map(teacher => ({
-        'Teacher ID': teacher.id,
         'Name': teacher.name,
         'Email': teacher.email,
         'Phone': teacher.phone || '',
@@ -161,7 +161,7 @@ const ManageTeachers = () => {
             title="Add Teacher"
             onPress={() => {
               setEditingTeacher(null);
-              setFormData({ name: '', id: '', email: '', phone: '' });
+              setFormData({ name: '', email: '', phone: '' });
               setModalVisible(true);
             }}
             className="flex-1 min-w-[120px]"
@@ -196,7 +196,6 @@ const ManageTeachers = () => {
               <View className="flex-row items-start justify-between">
                 <View className="flex-1 pr-4">
                   <Text className="text-base font-semibold text-gray-900 mb-1">{teacher.name}</Text>
-                  <Text className="text-gray-600 text-sm">ID: {teacher.id}</Text>
                   <Text className="text-gray-600 text-sm">Email: {teacher.email}</Text>
                   {teacher.phone ? <Text className="text-gray-600 text-sm">Phone: {teacher.phone}</Text> : null}
                 </View>
@@ -208,7 +207,7 @@ const ManageTeachers = () => {
                     <Text className="text-gray-700 text-sm font-semibold">Edit</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => handleDelete(teacher.id)}
+                    onPress={() => handleDelete(teacher.id as string)}
                     className="rounded-lg border border-red-300 px-3 py-2 bg-red-50"
                   >
                     <Text className="text-red-600 text-sm font-semibold">Delete</Text>
@@ -239,15 +238,6 @@ const ManageTeachers = () => {
                   value={formData.name}
                   onChangeText={(text) => setFormData({ ...formData, name: text })}
                   placeholder="Enter name"
-                  className="border border-gray-300 rounded-lg p-3"
-                />
-              </View>
-              <View className="mb-4">
-                <Text className="text-sm font-semibold mb-2">Teacher ID *</Text>
-                <TextInput
-                  value={formData.id}
-                  onChangeText={(text) => setFormData({ ...formData, id: text })}
-                  placeholder="Enter teacher ID"
                   className="border border-gray-300 rounded-lg p-3"
                 />
               </View>
@@ -323,7 +313,7 @@ const ManageTeachers = () => {
                   </Text>
                   <View className="bg-white rounded-lg p-3 border border-gray-200">
                     <Text className="text-xs font-mono text-gray-700">
-                      Teacher ID | Name | Email | Phone | Department
+                      Name | Email | Phone | Department
                     </Text>
                   </View>
                 </View>
@@ -333,12 +323,6 @@ const ManageTeachers = () => {
                     Required Columns:
                   </Text>
                   <View className="space-y-2">
-                    <View className="flex-row items-center">
-                      <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                      <Text className="text-sm text-gray-700 ml-2">
-                        <Text className="font-bold">Teacher ID</Text> - Unique identifier (required)
-                      </Text>
-                    </View>
                     <View className="flex-row items-center">
                       <Ionicons name="checkmark-circle" size={16} color="#10B981" />
                       <Text className="text-sm text-gray-700 ml-2">
@@ -374,10 +358,7 @@ const ManageTeachers = () => {
                     • All required fields must be filled
                   </Text>
                   <Text className="text-xs text-blue-800">
-                    • Teacher IDs must be unique
-                  </Text>
-                  <Text className="text-xs text-blue-800">
-                    • Teachers can register using their Teacher ID after being added
+                    • Teachers can register with their email after being added here
                   </Text>
                   <Text className="text-xs text-blue-800">
                     • Supported formats: .xlsx, .xls, .csv
@@ -390,9 +371,9 @@ const ManageTeachers = () => {
                   </Text>
                   <View className="bg-white rounded-lg p-3 border border-gray-200">
                     <Text className="text-xs font-mono text-gray-700">
-                      Teacher ID | Name | Email | Phone | Department{'\n'}
-                      TCH001 | Jane Smith | jane@example.com | 1234567890 | DCSE{'\n'}
-                      TCH002 | John Doe | john@example.com | | DCSE
+                      Name | Email | Phone | Department{'\n'}
+                      Jane Smith | jane@example.com | 1234567890 | DCSE{'\n'}
+                      John Doe | john@example.com | | DCSE
                     </Text>
                   </View>
                 </View>

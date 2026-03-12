@@ -7,6 +7,7 @@ import { useErrorModal } from '../components/ErrorModal';
 import { GlassCard, GradientBackground, PrimaryButton, ScrollContainer } from '../components/ui/kit';
 import { addDocument, deleteDocument, getCollection, queryCollection, updateDocument, getDocument } from '../firebase/firestoreService';
 import { getCurrentSession } from '../firebase/sessionService';
+import { toStoredPhone, isValidIndianPhone } from '../utils/phoneUtils';
 
 const ManageStudents = () => {
   const [students, setStudents] = useState<any[]>([]);
@@ -18,7 +19,6 @@ const ManageStudents = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
-    studentId: '',
     name: '',
     email: '',
     phone: '',
@@ -52,19 +52,28 @@ const ManageStudents = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.studentId || !formData.name || !formData.email || !formData.rollNo || !formData.classId) {
-      showError('Please fill in all required fields');
+    if (!formData.name?.trim() || !formData.email?.trim() || !formData.rollNo?.trim() || !formData.classId) {
+      showError('Please fill in name, email, roll number, and class');
+      return;
+    }
+    const phoneRaw = (formData.phone || '').trim().replace(/\D/g, '');
+    if (phoneRaw && !isValidIndianPhone(phoneRaw)) {
+      showError('Please enter a valid 10-digit phone number');
       return;
     }
 
     try {
       const currentSession = await getCurrentSession();
       const studentData = {
-        ...formData,
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: phoneRaw ? toStoredPhone(phoneRaw) : '',
+        rollNo: formData.rollNo.trim(),
+        classId: formData.classId,
         sessionId: currentSession?.id,
       };
 
-      if (editingStudent) {
+      if (editingStudent?.id) {
         await updateDocument('students', editingStudent.id, studentData);
       } else {
         await addDocument('students', studentData);
@@ -110,7 +119,6 @@ const ManageStudents = () => {
       filtered = filtered.filter(
         (student) =>
           student.name?.toLowerCase().includes(query) ||
-          student.studentId?.toLowerCase().includes(query) ||
           student.email?.toLowerCase().includes(query) ||
           student.rollNo?.toLowerCase().includes(query) ||
           student.rollNumber?.toLowerCase().includes(query)
@@ -122,7 +130,6 @@ const ManageStudents = () => {
 
   const resetForm = () => {
     setFormData({
-      studentId: '',
       name: '',
       email: '',
       phone: '',
@@ -134,11 +141,11 @@ const ManageStudents = () => {
 
   const openEditModal = (student: any) => {
     setEditingStudent(student);
+    const rawPhone = (student.phone || '').replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10);
     setFormData({
-      studentId: student.studentId || '',
       name: student.name || '',
       email: student.email || '',
-      phone: student.phone || '',
+      phone: rawPhone,
       rollNo: student.rollNo || student.rollNumber || '',
       classId: student.classId || '',
     });
@@ -174,7 +181,7 @@ const ManageStudents = () => {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search by name, ID, email, or roll number..."
+              placeholder="Search by name, email, or roll number..."
               className="flex-1 ml-3 text-gray-900"
               placeholderTextColor="#9ca3af"
             />
@@ -232,7 +239,7 @@ const ManageStudents = () => {
           </ScrollView>
         </View>
 
-        <TouchableOpacity
+        {/* <TouchableOpacity
           onPress={() => {
             resetForm();
             setModalVisible(true);
@@ -241,7 +248,7 @@ const ManageStudents = () => {
         >
           <Ionicons name="add-circle-outline" size={20} color="#fff" />
           <Text className="text-white font-bold text-base ml-2">Add New Student</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         {filteredStudents.length === 0 ? (
           <GlassCard className="p-6">
@@ -263,7 +270,6 @@ const ManageStudents = () => {
               <View className="flex-row items-center justify-between">
                 <View className="flex-1">
                   <Text className="text-lg font-semibold text-gray-900">{student.name}</Text>
-                  <Text className="text-sm text-gray-500">ID: {student.studentId}</Text>
                   <Text className="text-sm text-gray-500">Roll: {student.rollNo || student.rollNumber || 'N/A'}</Text>
                   <Text className="text-sm text-gray-500">Email: {student.email}</Text>
                 </View>
@@ -302,16 +308,6 @@ const ManageStudents = () => {
 
                 <View className="space-y-4">
                   <View>
-                    <Text className="text-sm font-semibold text-gray-700 mb-2">Student ID *</Text>
-                    <TextInput
-                      value={formData.studentId}
-                      onChangeText={(text) => setFormData({ ...formData, studentId: text })}
-                      placeholder="STU001"
-                      className="bg-gray-50 px-4 py-3 rounded-xl border border-gray-200 text-gray-900"
-                      placeholderTextColor="#9ca3af"
-                    />
-                  </View>
-                  <View>
                     <Text className="text-sm font-semibold text-gray-700 mb-2">Name *</Text>
                     <TextInput
                       value={formData.name}
@@ -348,9 +344,10 @@ const ManageStudents = () => {
                     <Text className="text-sm font-semibold text-gray-700 mb-2">Phone</Text>
                     <TextInput
                       value={formData.phone}
-                      onChangeText={(text) => setFormData({ ...formData, phone: text })}
-                      placeholder="+91 9876543210"
+                      onChangeText={(text) => setFormData({ ...formData, phone: text.replace(/\D/g, '').slice(0, 10) })}
+                      placeholder="10-digit number"
                       keyboardType="phone-pad"
+                      maxLength={10}
                       className="bg-gray-50 px-4 py-3 rounded-xl border border-gray-200 text-gray-900"
                       placeholderTextColor="#9ca3af"
                     />

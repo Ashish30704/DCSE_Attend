@@ -1,27 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { useErrorModal } from '../components/ErrorModal';
-import { GlassCard, GradientBackground, PrimaryButton, SecondaryButton } from '../components/ui/kit';
+import { GradientBackground, PrimaryButton, SecondaryButton } from '../components/ui/kit';
+import { Input } from '../components/ui/Input';
 import { registerUser } from '../firebase/authService';
 import { setUser } from '../redux/slices/authSlice';
-
-const Field = React.memo(({ label, required = false, ...inputProps }) => (
-  <View className="mb-4">
-    <Text className="text-sm font-semibold text-gray-700 mb-2">
-      {label} {required && <Text className="text-red-500">*</Text>}
-    </Text>
-    <TextInput
-      {...inputProps}
-      className={`w-full py-3 px-4 rounded-lg bg-gray-50 border border-gray-300 text-gray-900 ${
-        inputProps.className || ''
-      }`}
-      placeholderTextColor="#9ca3af"
-    />
-  </View>
-));
+import { toStoredPhone, isValidIndianPhone } from '../utils/phoneUtils';
 
 const RegisterScreen = () => {
   const [formData, setFormData] = useState({
@@ -29,7 +16,6 @@ const RegisterScreen = () => {
     email: '',
     password: '',
     confirmPassword: '',
-    id: '',
     rollNo: '',
     phone: '',
     role: 'teacher',
@@ -40,19 +26,15 @@ const RegisterScreen = () => {
   const { showError } = useErrorModal();
 
   const handleRegister = async () => {
-    const { name, email, password, confirmPassword, id, rollNo, phone, role } = formData;
+    const { name, email, password, confirmPassword, rollNo, phone, role } = formData;
 
-    // Validation based on role
-    if (role === 'student') {
-      if (!name || !email || !password || !rollNo) {
-        showError('Please fill in all required fields', { title: 'Missing Information' });
-        return;
-      }
-    } else {
-      if (!name || !email || !password || !id) {
-        showError('Please fill in all required fields', { title: 'Missing Information' });
-        return;
-      }
+    if (!name || !email || !password) {
+      showError('Please fill in name, email, and password', { title: 'Missing Information' });
+      return;
+    }
+    if (role === 'student' && !rollNo) {
+      showError('Roll number is required for student registration', { title: 'Missing Information' });
+      return;
     }
 
     if (password !== confirmPassword) {
@@ -64,14 +46,17 @@ const RegisterScreen = () => {
       showError('Password must be at least 6 characters', { title: 'Weak password' });
       return;
     }
+    if (phone && !isValidIndianPhone(phone)) {
+      showError('Please enter a valid 10-digit phone number', { title: 'Invalid phone' });
+      return;
+    }
 
     setLoading(true);
     try {
       const userData = {
         name,
-        id: role === 'student' ? undefined : id,
         rollNo: role === 'student' ? rollNo : undefined,
-        phone: phone || '',
+        phone: phone ? toStoredPhone(phone) : '',
         role,
         department: 'DCSE',
       };
@@ -79,14 +64,10 @@ const RegisterScreen = () => {
       const user = await registerUser(email, password, userData);
       dispatch(setUser(user));
 
-      // Navigate based on role
-      if (role === 'admin') {
-        router.replace('/admin/dashboard');
-      } else if (role === 'teacher') {
-        router.replace('/teacher/dashboard');
-      } else if (role === 'student') {
-        router.replace('/student/dashboard');
-      }
+      if (user.role === 'admin') router.replace('/admin/dashboard');
+      else if (user.role === 'teacher') router.replace('/teacher/dashboard');
+      else if (user.role === 'student') router.replace('/student/dashboard');
+      else router.replace('/');
     } catch (error) {
       showError(error.message || 'Could not create account', { title: 'Registration Failed' });
     } finally {
@@ -107,108 +88,47 @@ const RegisterScreen = () => {
   return (
     <GradientBackground>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="flex-grow px-2 max-w-2xl w-full mx-auto py-6">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="flex-grow max-w-content w-full mx-auto px-4 py-8 lg:py-12">
           <View className="items-center mb-6">
-            <View className="w-14 h-14 rounded-xl p-2 bg-blue-600 items-center justify-center mb-4">
-              <Ionicons name="person-add-outline" size={24} color="#fff" />
+            <View className="w-20 h-20 rounded-2xl overflow-hidden bg-white border border-neutral-200 mb-5" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 }}>
+              <Image source={require('../../assets/images/mainLogo.jpeg')} style={{ width: 80, height: 80 }} resizeMode="cover" />
             </View>
-            <Text className="text-2xl font-bold text-gray-900 mb-2">Create an account</Text>
-            <Text className="text-center text-sm text-gray-600">
+            <Text className="text-2xl font-bold text-neutral-900 mb-2">Create an account</Text>
+            <Text className="text-center text-sm text-neutral-500 max-w-[280px]">
               Access classes, attendance, and student records from a single dashboard
             </Text>
           </View>
 
-          <GlassCard className="p-5">
-            <View className="mb-5">
-              <Text className="text-xs uppercase tracking-wide text-gray-500 mb-3">Register as</Text>
-              <View className="flex-row gap-2">
-                {roleOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option.key}
-                    onPress={() => updateField('role', option.key)}
-                    className={`flex-1 rounded-lg border py-2 ${
-                      formData.role === option.key ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300'
-                    }`}
-                  >
-                    <Text
-                      className={`text-center text-sm font-semibold ${
-                        formData.role === option.key ? 'text-white' : 'text-gray-700'
-                      }`}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+          <View className="rounded-2xl bg-white border border-neutral-200 p-6" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 }}>
+            <Text className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Register as</Text>
+            <View className="flex-row gap-2 mb-6">
+              {roleOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  onPress={() => updateField('role', option.key)}
+                  className={'flex-1 rounded-xl py-3 border-2 ' + (formData.role === option.key ? 'bg-primary-600 border-primary-600' : 'bg-neutral-50 border-neutral-200')}
+                >
+                  <Text className={'text-center text-sm font-semibold ' + (formData.role === option.key ? 'text-white' : 'text-neutral-700')}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
-            <View>
-              <Field
-                label="Full name"
-                required
-                value={formData.name}
-                onChangeText={(value) => updateField('name', value)}
-                placeholder="Jane Doe"
-              />
-              {formData.role === 'student' ? (
-                <Field
-                  label="Roll Number"
-                  required
-                  value={formData.rollNo}
-                  onChangeText={(value) => updateField('rollNo', value)}
-                  placeholder="1"
-                  keyboardType="numeric"
-                />
-              ) : (
-                <Field
-                  label={formData.role === 'teacher' ? 'Teacher ID' : 'Admin ID'}
-                  required
-                  value={formData.id}
-                  onChangeText={(value) => updateField('id', value)}
-                  placeholder={formData.role === 'teacher' ? 'TCH-001' : 'ADM-001'}
-                />
-              )}
-              <Field
-                label="Institution email"
-                required
-                value={formData.email}
-                onChangeText={(value) => updateField('email', value)}
-                placeholder="you@dcse.edu"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Field
-                label="Phone"
-                value={formData.phone}
-                onChangeText={(value) => updateField('phone', value)}
-                placeholder="+91 9876543210"
-                keyboardType="phone-pad"
-              />
-              <Field
-                label="Password"
-                required
-                value={formData.password}
-                onChangeText={(value) => updateField('password', value)}
-                placeholder="Create a password"
-                secureTextEntry
-              />
-              <Field
-                label="Confirm Password"
-                required
-                value={formData.confirmPassword}
-                onChangeText={(value) => updateField('confirmPassword', value)}
-                placeholder="Re-enter password"
-                secureTextEntry
-              />
-            </View>
+            <Input label="Full name" value={formData.name} onChangeText={(v) => updateField('name', v)} placeholder="Jane Doe" />
+            {formData.role === 'student' && (
+              <Input label="Roll Number" value={formData.rollNo} onChangeText={(v) => updateField('rollNo', v)} placeholder="1" keyboardType="numeric" />
+            )}
+            <Input label="Email" value={formData.email} onChangeText={(v) => updateField('email', v)} placeholder="your@email.com" keyboardType="email-address" autoCapitalize="none" />
+            <Input label="Phone" value={formData.phone} onChangeText={(v) => updateField('phone', v.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit number" keyboardType="phone-pad" maxLength={10} />
+            <Input label="Password" value={formData.password} onChangeText={(v) => updateField('password', v)} placeholder="Create a password" secureTextEntry />
+            <Input label="Confirm Password" value={formData.confirmPassword} onChangeText={(v) => updateField('confirmPassword', v)} placeholder="Re-enter password" secureTextEntry />
 
-            <PrimaryButton title="Create Account" onPress={handleRegister} loading={loading} />
+            <PrimaryButton title="Create account" onPress={handleRegister} loading={loading} fullWidth />
 
-            <View className="items-center gap-2 mt-5">
-              <Text className="text-gray-500 text-sm">Already on the platform?</Text>
-              <SecondaryButton title="Back to login" onPress={() => router.back()} />
+            <View className="items-center mt-6 pt-5 border-t border-neutral-100">
+              <Text className="text-neutral-500 text-sm mb-3">Already on the platform?</Text>
+              <SecondaryButton title="Back to login" onPress={() => router.back()} fullWidth />
             </View>
-          </GlassCard>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </GradientBackground>

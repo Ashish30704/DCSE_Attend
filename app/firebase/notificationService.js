@@ -106,6 +106,42 @@ export const createAttendanceNotifications = async ({
   }
 };
 
+/**
+ * Notify enrolled students (by class) when a new assignment is posted.
+ * @param {{ classId: string, subjectId: string, assignmentName: string }} params
+ */
+export const createAssignmentNotifications = async ({ classId, subjectId, assignmentName }) => {
+  if (!isFirestoreAvailable || !classId || !assignmentName) return;
+  try {
+    const studentsQuery = query(
+      collection(firestore, 'students'),
+      where('classId', '==', classId)
+    );
+    const studentsSnapshot = await getDocs(studentsQuery);
+    const students = studentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    const promises = students.map(async (student) => {
+      if (!student.uid) return;
+      try {
+        const pushToken = await getUserPushToken(student.uid);
+        if (pushToken) {
+          await sendPushNotification(
+            pushToken,
+            'New Assignment Posted',
+            assignmentName,
+            { type: 'assignment', subjectId, classId }
+          );
+        }
+      } catch (err) {
+        console.warn('[notificationService] Assignment push failed for', student.uid, err);
+      }
+    });
+    await Promise.all(promises);
+  } catch (error) {
+    console.error('[notificationService] createAssignmentNotifications error', error);
+  }
+};
+
 // Note: Database notification functions removed - notifications are now push-only
 // These functions are kept for backward compatibility but return empty results
 

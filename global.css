@@ -1,3 +1,25 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Prevent layout overflow on web and small viewports */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+}
+/* Contain app root so frame never exceeds viewport */
+#root, [data-reactroot], [data-expo-root] {
+  overflow-x: hidden;
+  max-width: 100%;
+  min-height: 100%;
+}
+/* Responsive content width on web */
+@media (min-width: 768px) {
+  #root, [data-expo-root] { padding-left: 1rem; padding-right: 1rem; }
+}
+@media (min-width: 1024px) {
+  #root, [data-expo-root] { padding-left: 1.5rem; padding-right: 1.5rem; }
+}

@@ -9,10 +9,11 @@ import { GlassCard, GradientBackground, PillTag, PrimaryButton, ScrollContainer 
 import { addDocument, getDocument, queryCollection } from '../firebase/firestoreService';
 
 type Student = {
-  studentId: string;
+  id?: string;
   name: string;
   email?: string;
   phone?: string;
+  rollNo?: string;
   rollNumber?: string;
 };
 
@@ -126,40 +127,31 @@ const AttendanceScreen = () => {
         where('date', '==', date)
       )) as any[];
 
-      let locked = false;
+      const getRollNo = (s: Student) => String(s?.rollNo ?? s?.rollNumber ?? s?.id ?? '').trim();
       if (attendanceList.length > 0) {
-        locked = true;
         const existing = attendanceList[0];
-        // Convert presentStudents/absentStudents arrays back to attendance object
         const attendanceObj: Record<string, boolean> = {};
-        const presentRollNos = new Set(existing.presentStudents || []);
+        const presentRollNos = new Set((existing.presentStudents || []).map(String));
         studentsList.forEach((student) => {
-          if (student?.studentId) {
-            const rollNo = student.rollNo || student.rollNumber;
-            if (rollNo) {
-              attendanceObj[student.studentId] = presentRollNos.has(rollNo);
-            }
-          }
+          const rollNo = getRollNo(student);
+          if (rollNo) attendanceObj[rollNo] = presentRollNos.has(rollNo);
         });
         setAttendance(attendanceObj);
       } else {
-        // Initialize with all students as absent
         const initialAttendance: Record<string, boolean> = {};
         studentsList.forEach((student) => {
-          if (student?.studentId) initialAttendance[student.studentId] = false;
+          const rollNo = getRollNo(student);
+          if (rollNo) initialAttendance[rollNo] = false;
         });
         setAttendance(initialAttendance);
       }
 
-      // Check time window
+      // Lock attendance only after 5:00 PM on the selected day (editable same day before 5 PM)
       const now = new Date();
       const selected = new Date(date + 'T00:00:00');
-      let allowEdit = false;
-      if (now.toDateString() === selected.toDateString()) {
-        const hour = now.getHours();
-        allowEdit = hour >= 9 && hour < 17;
-      }
-      setAttendanceLocked(locked || !allowEdit);
+      const isSameDay = now.toDateString() === selected.toDateString();
+      const allowEdit = isSameDay && now.getHours() < 17;
+      setAttendanceLocked(!allowEdit);
     } catch (error) {
       showError('Failed to load data', { title: 'Error' });
     } finally {
@@ -167,17 +159,17 @@ const AttendanceScreen = () => {
     }
   };
 
-  const toggleAttendance = (studentId: string) => {
-    setAttendance(prev => ({
-      ...prev,
-      [studentId]: !prev[studentId],
-    }));
+  const getRollNo = (s: Student) => String(s?.rollNo ?? s?.rollNumber ?? s?.id ?? '').trim();
+
+  const toggleAttendance = (rollNo: string) => {
+    setAttendance(prev => ({ ...prev, [rollNo]: !prev[rollNo] }));
   };
 
   const markAllPresent = () => {
     const allPresent: Record<string, boolean> = {};
     students.forEach((student) => {
-      allPresent[student.studentId] = true;
+      const r = getRollNo(student);
+      if (r) allPresent[r] = true;
     });
     setAttendance(allPresent);
   };
@@ -185,13 +177,21 @@ const AttendanceScreen = () => {
   const markAllAbsent = () => {
     const allAbsent: Record<string, boolean> = {};
     students.forEach((student) => {
-      allAbsent[student.studentId] = false;
+      const r = getRollNo(student);
+      if (r) allAbsent[r] = false;
     });
     setAttendance(allAbsent);
   };
 
   const handleSave = async () => {
     if (attendanceLocked) return;
+    const now = new Date();
+    const selected = new Date(date + 'T00:00:00');
+    const isSameDay = now.toDateString() === selected.toDateString();
+    if (!isSameDay || now.getHours() >= 17) {
+      showError('Attendance can only be edited before 5:00 PM on the same day.', { title: 'Editing closed' });
+      return;
+    }
     setSaving(true);
     try {
       // Get current session
@@ -203,9 +203,9 @@ const AttendanceScreen = () => {
       const absentStudents: string[] = [];
       
       students.forEach((student) => {
-        const rollNo = student.rollNo || student.rollNumber;
+        const rollNo = getRollNo(student);
         if (rollNo) {
-          if (attendance[student.studentId]) {
+          if (attendance[rollNo]) {
             presentStudents.push(rollNo);
           } else {
             absentStudents.push(rollNo);
@@ -236,29 +236,40 @@ const AttendanceScreen = () => {
         where('subjectId', '==', subjectId),
         where('date', '==', date)
       )) as AttendanceDoc[];
-      
-      // Only add, never update if locked
+
+      const { updateDocument } = await import('../firebase/firestoreService');
       if (existingAttendance.length === 0) {
         await addDocument('attendance', attendanceData);
-        
-        // Create notifications for students
-        try {
-          const { createAttendanceNotifications } = await import('../firebase/notificationService');
-          const className = `${classData?.name || ''} ${classData?.section || ''}`.trim();
-          await createAttendanceNotifications({
-            classId: String(classId),
-            subjectId: String(subjectId),
-            subjectName: subjectData?.name || 'Subject',
-            className: className || 'Class',
-            date,
-            presentStudents,
-            absentStudents,
-            teacherName: user?.name || 'Teacher',
-          });
-        } catch (notifError) {
-          // Don't fail attendance save if notifications fail
-          console.warn('Failed to create notifications:', notifError);
+      } else {
+        const existingId = existingAttendance[0].id;
+        if (!existingId) {
+          showError('Could not update attendance record.', { title: 'Error' });
+          setSaving(false);
+          return;
         }
+        await updateDocument('attendance', existingId, {
+          presentStudents,
+          absentStudents,
+          teacherId: attendanceData.teacherId,
+          sessionId: attendanceData.sessionId,
+        });
+      }
+
+      try {
+        const { createAttendanceNotifications } = await import('../firebase/notificationService');
+        const className = `${classData?.name || ''} ${classData?.section || ''}`.trim();
+        await createAttendanceNotifications({
+          classId: String(classId),
+          subjectId: String(subjectId),
+          subjectName: subjectData?.name || 'Subject',
+          className: className || 'Class',
+          date,
+          presentStudents,
+          absentStudents,
+          teacherName: user?.name || 'Teacher',
+        });
+      } catch (notifError) {
+        console.warn('Failed to create notifications:', notifError);
       }
       showSuccess('Attendance saved successfully');
     } catch (error) {
@@ -298,7 +309,7 @@ const AttendanceScreen = () => {
             </TouchableOpacity>
             <Text className="text-2xl font-bold text-gray-900">{subjectData?.name}</Text>
             <Text className="text-gray-500 mt-1">
-              {classData?.name} — {classData?.section}
+              {classData?.name}{classData?.section ? ` — ${classData.section}` : ''}
             </Text>
             <View className="mt-3 flex-row flex-wrap gap-2">
               <PillTag text={`Date: ${date}`} variant="outline" />
@@ -362,47 +373,49 @@ const AttendanceScreen = () => {
             <Text className="text-center text-gray-500">No students in this class</Text>
           </GlassCard>
         ) : (
-          students.map((student: Student) => (
-            <GlassCard
-              key={student.studentId}
-              className={`p-4 mb-2 border-2 ${attendance[student.studentId] ? 'border-green-300 bg-green-50/70' : 'border-gray-100'}`}
-            >
-              {attendanceLocked ? (
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1 pr-4">
-                    <Text className="text-lg font-semibold text-gray-900">{student.name}</Text>
-                    <Text className="text-gray-500 text-sm">ID: {student.studentId}</Text>
-                    {(student.rollNo || student.rollNumber) ? <Text className="text-gray-500 text-sm">Roll: {student.rollNo || student.rollNumber}</Text> : null}
+          students.map((student: Student) => {
+            const rollNo = getRollNo(student);
+            if (!rollNo) return null;
+            return (
+              <GlassCard
+                key={rollNo}
+                className={`p-4 mb-2 border-2 ${attendance[rollNo] ? 'border-green-300 bg-green-50/70' : 'border-gray-100'}`}
+              >
+                {attendanceLocked ? (
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-1 pr-4">
+                      <Text className="text-lg font-semibold text-gray-900">{student.name}</Text>
+                      <Text className="text-gray-500 text-sm">Roll: {rollNo}</Text>
+                    </View>
+                    <View
+                      className={`w-8 h-8 rounded-full border-2 items-center justify-center ${attendance[rollNo] ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}
+                    >
+                      {attendance[rollNo] ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
+                    </View>
                   </View>
-                  <View
-                    className={`w-8 h-8 rounded-full border-2 items-center justify-center ${attendance[student.studentId] ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}
-                  >
-                    {attendance[student.studentId] ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
-                  </View>
-                </View>
-              ) : (
-                <TouchableOpacity className="flex-row items-center justify-between" onPress={() => toggleAttendance(student.studentId)}>
-                  <View className="flex-1 pr-4">
-                    <Text className="text-lg font-semibold text-gray-900">{student.name}</Text>
-                    <Text className="text-gray-500 text-sm">ID: {student.studentId}</Text>
-                    {(student.rollNo || student.rollNumber) ? <Text className="text-gray-500 text-sm">Roll: {student.rollNo || student.rollNumber}</Text> : null}
-                  </View>
-                  <View
-                    className={`w-8 h-8 rounded-full border-2 items-center justify-center ${attendance[student.studentId] ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}
-                  >
-                    {attendance[student.studentId] ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
-                  </View>
-                </TouchableOpacity>
-              )}
-            </GlassCard>
-          ))
+                ) : (
+                  <TouchableOpacity className="flex-row items-center justify-between" onPress={() => toggleAttendance(rollNo)}>
+                    <View className="flex-1 pr-4">
+                      <Text className="text-lg font-semibold text-gray-900">{student.name}</Text>
+                      <Text className="text-gray-500 text-sm">Roll: {rollNo}</Text>
+                    </View>
+                    <View
+                      className={`w-8 h-8 rounded-full border-2 items-center justify-center ${attendance[rollNo] ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}
+                    >
+                      {attendance[rollNo] ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </GlassCard>
+            );
+          })
         )}
 
         {!attendanceLocked && (
           <PrimaryButton title="Save Attendance" onPress={handleSave} loading={saving} />
         )}
         {attendanceLocked && (
-          <Text className="my-4 text-center text-orange-500 font-semibold">Attendance for this date is view-only and cannot be edited.</Text>
+          <Text className="my-4 text-center text-amber-600 font-semibold">Attendance can only be edited before 5:00 PM on the same day. It is now locked for this date.</Text>
         )}
       </ScrollContainer>
     </GradientBackground>

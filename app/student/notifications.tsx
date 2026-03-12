@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSelector } from 'react-redux';
+import { Header } from '../components/ui';
 import { GlassCard, GradientBackground } from '../components/ui/kit';
 
 const NotificationsScreen = () => {
@@ -16,16 +17,11 @@ const NotificationsScreen = () => {
         contentContainerClassName="px-4 sm:px-6 pt-6 pb-12 gap-4"
         showsVerticalScrollIndicator={false}
       >
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-1">
-            <TouchableOpacity onPress={() => router.back()} className="flex-row items-center gap-2 mb-3">
-              <Ionicons name="chevron-back" size={18} color="#2563eb" />
-              <Text className="text-sm font-semibold text-blue-600">Back</Text>
-            </TouchableOpacity>
-            <Text className="text-2xl font-bold text-gray-900">Notifications</Text>
-            <Text className="text-sm text-gray-600 mt-1">Push notifications</Text>
-          </View>
-        </View>
+        <Header
+          title="Notifications"
+          subtitle="Push notifications"
+          onBack={() => router.back()}
+        />
 
         <GlassCard className="p-8">
           <View className="items-center">

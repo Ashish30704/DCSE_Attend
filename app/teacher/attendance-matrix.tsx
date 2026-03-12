@@ -2,12 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { where } from 'firebase/firestore';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import { useSelector } from 'react-redux';
 import { useErrorModal } from '../components/ErrorModal';
 import { GlassCard, GradientBackground, PillTag, ScrollContainer } from '../components/ui/kit';
 import { getDocument, queryCollection } from '../firebase/firestoreService';
 import { getCurrentSession } from '../firebase/sessionService';
+
+type DateFilterMode = 'all' | 'single' | 'range';
 
 type RootState = {
   auth: {
@@ -20,7 +23,6 @@ type RootState = {
 
 type Student = {
   id?: string;
-  studentId: string;
   name: string;
   rollNo?: string;
   rollNumber?: string;
@@ -51,9 +53,8 @@ type AttendanceDoc = {
 };
 
 type StudentRow = {
-  studentId: string;
+  rollNo: string;
   name: string;
-  rollNumber?: string;
   totals: {
     totalClasses: number;
     presents: number;
@@ -86,6 +87,14 @@ const AttendanceMatrixScreen = () => {
     >
   >({});
   const [loading, setLoading] = useState(true);
+
+  // Date filter: all | single date | date range
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all');
+  const [singleDate, setSingleDate] = useState<string | null>(null);
+  const [rangeFrom, setRangeFrom] = useState<string | null>(null);
+  const [rangeTo, setRangeTo] = useState<string | null>(null);
+  const [calendarModalOpen, setCalendarModalOpen] = useState(false);
+  const [calendarMode, setCalendarMode] = useState<'single' | 'rangeFrom' | 'rangeTo'>('single');
 
   useEffect(() => {
     if (classId && user?.uid) {
@@ -167,71 +176,47 @@ const AttendanceMatrixScreen = () => {
         }
       > = {};
 
+      const getRollNo = (s: Student) => String(s?.rollNo ?? s?.rollNumber ?? s?.id ?? '').trim();
       studentsList.forEach((student) => {
-        if (!student.studentId) return;
-        matrixData[student.studentId] = {};
-        totalsByStudent[student.studentId] = { total: 0, present: 0 };
+        const rollNo = getRollNo(student);
+        if (!rollNo) return;
+        matrixData[rollNo] = {};
+        totalsByStudent[rollNo] = { total: 0, present: 0 };
       });
 
       attendanceList.forEach((doc) => {
         if (!doc.date) return;
-        
-        // Handle new format with presentStudents/absentStudents arrays
         if (doc.presentStudents || doc.absentStudents) {
-          const presentRollNos = new Set(doc.presentStudents || []);
-          const absentRollNos = new Set(doc.absentStudents || []);
-          
+          const presentRollNos = new Set((doc.presentStudents || []).map(String));
           studentsList.forEach((student) => {
-            const rollNo = student.rollNo || student.rollNumber;
-            if (!rollNo || !student.studentId) return;
-            
-            if (!matrixData[student.studentId][doc.date!]) {
-              matrixData[student.studentId][doc.date!] = { total: 0, present: 0 };
+            const rollNo = getRollNo(student);
+            if (!rollNo || !matrixData[rollNo]) return;
+            if (!matrixData[rollNo][doc.date!]) {
+              matrixData[rollNo][doc.date!] = { total: 0, present: 0 };
             }
-            matrixData[student.studentId][doc.date!].total += 1;
-            totalsByStudent[student.studentId].total += 1;
-            
+            matrixData[rollNo][doc.date!].total += 1;
+            totalsByStudent[rollNo].total += 1;
             if (presentRollNos.has(rollNo)) {
-              matrixData[student.studentId][doc.date!].present += 1;
-              totalsByStudent[student.studentId].present += 1;
-            }
-          });
-        } 
-        // Legacy format with students object
-        else if (doc.students) {
-          Object.entries(doc.students).forEach(([studentId, present]) => {
-            if (!matrixData[studentId]) return;
-            if (!matrixData[studentId][doc.date!]) {
-              matrixData[studentId][doc.date!] = { total: 0, present: 0 };
-            }
-            matrixData[studentId][doc.date!].total += 1;
-            totalsByStudent[studentId].total += 1;
-            if (present) {
-              matrixData[studentId][doc.date!].present += 1;
-              totalsByStudent[studentId].present += 1;
+              matrixData[rollNo][doc.date!].present += 1;
+              totalsByStudent[rollNo].present += 1;
             }
           });
         }
       });
 
       const studentRowData: StudentRow[] = studentsList
-        .filter((s) => s.studentId)
+        .filter((s) => getRollNo(s))
         .map((student) => {
-          const totals = totalsByStudent[student.studentId] || { total: 0, present: 0 };
+          const rollNo = getRollNo(student);
+          const totals = totalsByStudent[rollNo] || { total: 0, present: 0 };
           const totalClasses = totals.total;
           const presents = totals.present;
           const absents = Math.max(totalClasses - presents, 0);
           const percent = totalClasses ? Math.round((presents / totalClasses) * 100) : 0;
           return {
-            studentId: student.studentId,
+            rollNo,
             name: student.name,
-            rollNumber: student.rollNo || student.rollNumber,
-            totals: {
-              totalClasses,
-              presents,
-              absents,
-              percent,
-            },
+            totals: { totalClasses, presents, absents, percent },
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -248,6 +233,46 @@ const AttendanceMatrixScreen = () => {
   };
 
   const totalDates = useMemo(() => dates.length, [dates]);
+
+  const filteredDates = useMemo(() => {
+    if (dateFilterMode === 'all') return dates;
+    if (dateFilterMode === 'single') {
+      if (!singleDate) return [];
+      return dates.includes(singleDate) ? [singleDate] : [singleDate];
+    }
+    if (dateFilterMode === 'range') {
+      if (!rangeFrom || !rangeTo) return [];
+      return dates.filter((d) => d >= rangeFrom && d <= rangeTo);
+    }
+    return dates;
+  }, [dates, dateFilterMode, singleDate, rangeFrom, rangeTo]);
+
+  const filteredStudentRows = useMemo(() => {
+    if (dateFilterMode === 'all' || filteredDates.length === 0) {
+      if (dateFilterMode === 'all') return studentRows;
+      return studentRows.map((row) => ({
+        ...row,
+        totals: { totalClasses: 0, presents: 0, absents: 0, percent: 0 },
+      }));
+    }
+    return studentRows.map((row) => {
+      let total = 0;
+      let present = 0;
+      filteredDates.forEach((date) => {
+        const cell = matrix[row.rollNo]?.[date];
+        if (cell) {
+          total += cell.total;
+          present += cell.present;
+        }
+      });
+      const absents = Math.max(total - present, 0);
+      const percent = total ? Math.round((present / total) * 100) : 0;
+      return {
+        ...row,
+        totals: { totalClasses: total, presents: present, absents, percent },
+      };
+    });
+  }, [studentRows, dateFilterMode, filteredDates, matrix]);
 
   if (loading) {
     return (
@@ -286,16 +311,17 @@ const AttendanceMatrixScreen = () => {
         <GlassCard className="p-6 bg-blue-200 text-white">
           <Text className="text-gray-600 text-xs uppercase tracking-[0.4em] mb-3">Class Attendance</Text>
           <Text className="text-3xl font-bold text-gray-800">Attendance Matrix</Text>
-          <Text className="text-gray-700 mt-2">
-            View exact attendance counts for every student across all days attendance was taken, filtered by subject.
-          </Text>
+          
           <View className="mt-4 flex-row gap-3 flex-wrap">
             <PillTag
               text={`${classData.name || 'Class'} • ${classData.section || ''}`}
               variant="solid"
             />
             <PillTag text={`${studentRows.length} students`} />
-            <PillTag text={`${totalDates} attendance days`} variant="outline" />
+            <PillTag
+              text={dateFilterMode === 'all' ? `${totalDates} attendance days` : `${filteredDates.length} day(s) selected`}
+              variant="outline"
+            />
           </View>
         </GlassCard>
 
@@ -349,11 +375,167 @@ const AttendanceMatrixScreen = () => {
           )}
         </GlassCard>
 
+        {/* Date filter */}
+        <GlassCard className="p-5">
+          <Text className="text-sm font-semibold text-gray-700 mb-3">Filter by date</Text>
+          <View className="flex-row gap-2 justify-between mb-4">
+            <TouchableOpacity
+              onPress={() => {
+                setDateFilterMode('all');
+                setSingleDate(null);
+                setRangeFrom(null);
+                setRangeTo(null);
+              }}
+              className={`px-4 py-2 rounded-full border flex-row items-center gap-2 ${
+                dateFilterMode === 'all' ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-200'
+              }`}
+            >
+              <Ionicons name="calendar-outline" size={16} color={dateFilterMode === 'all' ? '#fff' : '#6b7280'} />
+              <Text className={dateFilterMode === 'all' ? 'text-white font-semibold' : 'text-gray-700 font-semibold'}>
+                All
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setDateFilterMode('single')}
+              className={`px-4 py-2 rounded-full border flex-row items-center gap-2 ${
+                dateFilterMode === 'single' ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-200'
+              }`}
+            >
+              <Ionicons name="today-outline" size={16} color={dateFilterMode === 'single' ? '#fff' : '#6b7280'} />
+              <Text className={dateFilterMode === 'single' ? 'text-white font-semibold' : 'text-gray-700 font-semibold'}>
+                Single
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setDateFilterMode('range')}
+              className={`px-4 py-2 rounded-full border flex-row items-center gap-2 ${
+                dateFilterMode === 'range' ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-200'
+              }`}
+            >
+              <Ionicons name="calendar" size={16} color={dateFilterMode === 'range' ? '#fff' : '#6b7280'} />
+              <Text className={dateFilterMode === 'range' ? 'text-white font-semibold' : 'text-gray-700 font-semibold'}>
+                Range
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {dateFilterMode === 'single' && (
+            <TouchableOpacity
+              onPress={() => {
+                setCalendarMode('single');
+                setCalendarModalOpen(true);
+              }}
+              className="flex-row items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"
+            >
+              <Text className="text-sm text-gray-600">
+                {singleDate ? singleDate : 'Select date'}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+            </TouchableOpacity>
+          )}
+
+          {dateFilterMode === 'range' && (
+            <View className="gap-3">
+              <TouchableOpacity
+                onPress={() => {
+                  setCalendarMode('rangeFrom');
+                  setCalendarModalOpen(true);
+                }}
+                className="flex-row items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"
+              >
+                <Text className="text-sm text-gray-600">From: {rangeFrom || 'Select date'}</Text>
+                <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setCalendarMode('rangeTo');
+                  setCalendarModalOpen(true);
+                }}
+                className="flex-row items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"
+              >
+                <Text className="text-sm text-gray-600">To: {rangeTo || 'Select date'}</Text>
+                <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {dateFilterMode !== 'all' && (filteredDates.length > 0 || dateFilterMode === 'single') && (
+            <Text className="text-xs text-gray-500 mt-3">
+              Showing {filteredDates.length} day{filteredDates.length !== 1 ? 's' : ''}
+            </Text>
+          )}
+        </GlassCard>
+
+        {/* Calendar modal for date pick */}
+        <Modal
+          visible={calendarModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setCalendarModalOpen(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setCalendarModalOpen(false)}
+            className="flex-1 bg-black/50 justify-end"
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} className="bg-white rounded-t-2xl p-4 pb-8">
+              <View className="flex-row items-center justify-between mb-3">
+                <Text className="text-lg font-semibold text-gray-800">
+                  {calendarMode === 'single' ? 'Select date' : calendarMode === 'rangeFrom' ? 'From date' : 'To date'}
+                </Text>
+                <TouchableOpacity onPress={() => setCalendarModalOpen(false)} className="p-2">
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              <Calendar
+                minDate={dates.length > 0 ? dates[0] : undefined}
+                maxDate={dates.length > 0 ? dates[dates.length - 1] : undefined}
+                markedDates={
+                  calendarMode === 'single' && singleDate
+                    ? { [singleDate]: { selected: true, selectedColor: '#2563eb' } }
+                    : calendarMode === 'rangeFrom' && rangeFrom
+                      ? { [rangeFrom]: { selected: true, selectedColor: '#2563eb' } }
+                      : calendarMode === 'rangeTo' && rangeTo
+                        ? { [rangeTo]: { selected: true, selectedColor: '#2563eb' } }
+                        : {}
+                }
+                onDayPress={(day) => {
+                  if (calendarMode === 'single') {
+                    setSingleDate(day.dateString);
+                    setCalendarModalOpen(false);
+                  } else if (calendarMode === 'rangeFrom') {
+                    setRangeFrom(day.dateString);
+                    if (rangeTo && day.dateString > rangeTo) setRangeTo(day.dateString);
+                    setCalendarModalOpen(false);
+                  } else {
+                    setRangeTo(day.dateString);
+                    if (rangeFrom && day.dateString < rangeFrom) setRangeFrom(day.dateString);
+                    setCalendarModalOpen(false);
+                  }
+                }}
+                theme={{
+                  selectedDayBackgroundColor: '#2563eb',
+                  selectedDayTextColor: '#ffffff',
+                  todayTextColor: '#2563eb',
+                  arrowColor: '#2563eb',
+                }}
+              />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+
         {studentRows.length === 0 || dates.length === 0 ? (
           <GlassCard className="p-8 items-center">
             <Ionicons name="information-circle-outline" size={36} color="#94a3b8" />
             <Text className="mt-3 text-gray-500 font-medium text-center">
               No attendance records are available yet for this class.
+            </Text>
+          </GlassCard>
+        ) : dateFilterMode !== 'all' && filteredDates.length === 0 ? (
+          <GlassCard className="p-8 items-center">
+            <Ionicons name="calendar-outline" size={36} color="#94a3b8" />
+            <Text className="mt-3 text-gray-500 font-medium text-center">
+              {dateFilterMode === 'single' ? 'Select a date above.' : 'Select From and To dates above.'}
             </Text>
           </GlassCard>
         ) : (
@@ -367,7 +549,7 @@ const AttendanceMatrixScreen = () => {
                   <View className="w-40 px-3 py-4 border-r border-blue-500">
                     <Text className="text-xs font-semibold text-white uppercase">Totals</Text>
                   </View>
-                  {dates.map((date) => (
+                  {(dateFilterMode === 'all' ? dates : filteredDates).map((date) => (
                     <View key={date} className="w-24 px-2 py-4 border-r border-blue-500">
                       <Text className="text-[11px] font-semibold text-white text-center">{date}</Text>
                     </View>
@@ -375,18 +557,18 @@ const AttendanceMatrixScreen = () => {
                 </View>
 
                 <ScrollView style={{ maxHeight: 480 }}>
-                  {studentRows.map((row) => (
+                  {(dateFilterMode === 'all' ? studentRows : filteredStudentRows).map((row) => (
                     <View
-                      key={row.studentId}
+                      key={row.rollNo}
                       className="flex-row border-b border-gray-100 bg-white/90"
                     >
                       <View className="w-40 px-3 py-3 border-r border-gray-100">
                         <Text className="text-sm font-semibold text-gray-900" numberOfLines={1}>
                           {row.name}
                         </Text>
-                        {row.rollNumber ? (
+                        {row.rollNo ? (
                           <Text className="text-xs text-gray-500" numberOfLines={1}>
-                            Roll: {row.rollNumber}
+                            Roll: {row.rollNo}
                           </Text>
                         ) : null}
                       </View>
@@ -410,8 +592,8 @@ const AttendanceMatrixScreen = () => {
                         </Text>
                       </View>
 
-                      {dates.map((date) => {
-                        const cell = matrix[row.studentId]?.[date];
+                      {(dateFilterMode === 'all' ? dates : filteredDates).map((date) => {
+                        const cell = matrix[row.rollNo]?.[date];
                         const total = cell?.total || 0;
                         const present = cell?.present || 0;
                         const absent = Math.max(total - present, 0);

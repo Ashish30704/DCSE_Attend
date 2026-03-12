@@ -8,11 +8,13 @@ import { addDocument, deleteDocument, getCollection, updateDocument } from '../f
 
 const ManageSubjects = () => {
   const [subjects, setSubjects] = useState([]);
+  const [filteredSubjects, setFilteredSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingSubject, setEditingSubject] = useState(null);
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -36,6 +38,7 @@ const ManageSubjects = () => {
       ]);
 
       setSubjects(subjectsList);
+      setFilteredSubjects(subjectsList);
       setClasses(classesList);
       setTeachers(teachersList);
     } catch (error) {
@@ -44,6 +47,15 @@ const ManageSubjects = () => {
       setLoading(false);
     }
   };
+
+  // Filter subjects by selected class
+  useEffect(() => {
+    if (selectedClassFilter === 'all') {
+      setFilteredSubjects(subjects);
+    } else {
+      setFilteredSubjects(subjects.filter((s) => s.classId === selectedClassFilter));
+    }
+  }, [selectedClassFilter, subjects]);
 
   const handleSave = async () => {
     if (!formData.name || !formData.code || !formData.classId) {
@@ -102,7 +114,19 @@ const ManageSubjects = () => {
 
   const getClassName = (classId) => {
     const classItem = classes.find(c => c.id === classId);
-    return classItem ? `${classItem.name} - ${classItem.section}` : 'Unknown';
+    return classItem ? `${classItem.name}${classItem.section ? ' - ' + classItem.section : ''}` : 'Unknown';
+  };
+
+  const handleEdit = (subject) => {
+    setEditingSubject(subject);
+    setFormData({
+      name: subject.name || '',
+      code: subject.code || '',
+      classId: subject.classId || '',
+      subjectTeacherId: subject.subjectTeacherId || subject.teacherId || '',
+      subjectTeacherUid: subject.subjectTeacherUid || '',
+    });
+    setModalVisible(true);
   };
 
   if (loading) {
@@ -126,6 +150,52 @@ const ManageSubjects = () => {
           <Text className="text-2xl font-bold text-gray-900">Manage Subjects</Text>
         </View>
 
+        {/* Class Filter */}
+        <View className="mb-4">
+          <Text className="text-sm font-semibold text-gray-700 mb-2">Filter by Class</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16 }}>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() => setSelectedClassFilter('all')}
+                className={`px-4 py-2 rounded-full border flex-row items-center gap-2 ${
+                  selectedClassFilter === 'all' ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-200'
+                }`}
+              >
+                <Ionicons name="apps" size={16} color={selectedClassFilter === 'all' ? '#fff' : '#6b7280'} />
+                <Text
+                  className={
+                    selectedClassFilter === 'all' ? 'text-white font-semibold' : 'text-gray-700 font-semibold'
+                  }
+                >
+                  All Classes
+                </Text>
+              </TouchableOpacity>
+              {classes.map((classItem) => (
+                <TouchableOpacity
+                  key={classItem.id}
+                  onPress={() => setSelectedClassFilter(classItem.id)}
+                  className={`px-4 py-2 rounded-full border flex-row items-center gap-2 ${
+                    selectedClassFilter === classItem.id ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-200'
+                  }`}
+                >
+                  <Ionicons
+                    name="school-outline"
+                    size={16}
+                    color={selectedClassFilter === classItem.id ? '#fff' : '#6b7280'}
+                  />
+                  <Text
+                    className={
+                      selectedClassFilter === classItem.id ? 'text-white font-semibold' : 'text-gray-700 font-semibold'
+                    }
+                  >
+                    {classItem.name} {classItem.section ? `• ${classItem.section}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
         <PrimaryButton
           title="Add Subject"
           onPress={() => {
@@ -135,12 +205,24 @@ const ManageSubjects = () => {
           }}
         />
 
-        {subjects.length === 0 ? (
+        {filteredSubjects.length === 0 ? (
           <GlassCard className="p-6">
-            <Text className="text-center text-gray-500">No subjects found</Text>
+            <Text className="text-center text-gray-500">
+              {selectedClassFilter !== 'all'
+                ? 'No subjects for this class.'
+                : 'No subjects found'}
+            </Text>
           </GlassCard>
         ) : (
-          subjects.map((subject) => (
+          <>
+            {subjects.length > 0 && (
+              <View className="mb-2">
+                <Text className="text-sm text-gray-500">
+                  Showing {filteredSubjects.length} of {subjects.length} subjects
+                </Text>
+              </View>
+            )}
+            {filteredSubjects.map((subject) => (
             <GlassCard key={subject.id} className="p-4">
               <View className="flex-row items-center justify-between">
                 <View className="flex-1 pr-4">
@@ -153,15 +235,24 @@ const ManageSubjects = () => {
                     Teacher: {getTeacherName(subject.subjectTeacherId || subject.teacherId)}
                   </Text>
                 </View>
-                <TouchableOpacity
-                  onPress={() => handleDelete(subject.id)}
-                  className="rounded-lg border border-red-300 px-3 py-2 bg-red-50"
-                >
-                  <Text className="text-red-600 text-sm font-semibold">Delete</Text>
-                </TouchableOpacity>
+                <View className="flex-row gap-2">
+                  <TouchableOpacity
+                    onPress={() => handleEdit(subject)}
+                    className="rounded-lg border border-gray-300 px-3 py-2 bg-white"
+                  >
+                    <Text className="text-gray-700 text-sm font-semibold">Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleDelete(subject.id)}
+                    className="rounded-lg border border-red-300 px-3 py-2 bg-red-50"
+                  >
+                    <Text className="text-red-600 text-sm font-semibold">Delete</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </GlassCard>
-          ))
+          ))}
+          </>
         )}
       </ScrollContainer>
 
@@ -173,11 +264,15 @@ const ManageSubjects = () => {
         onRequestClose={() => setModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 max-h-[80%]">
+          <View className="bg-white rounded-t-3xl p-6 max-h-[85%]">
             <Text className="text-2xl font-bold mb-4">
               {editingSubject ? 'Edit Subject' : 'Add Subject'}
             </Text>
-            <ScrollView>
+            <ScrollView
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
               <View className="mb-4">
                 <Text className="text-sm font-semibold mb-2">Subject Name *</Text>
                 <TextInput
@@ -196,9 +291,9 @@ const ManageSubjects = () => {
                   className="border border-gray-300 rounded-lg p-3"
                 />
               </View>
-              <View className="mb-6">
+              <View className="mb-4">
                 <Text className="text-sm font-semibold mb-2">Class *</Text>
-                <ScrollView className="max-h-40">
+                <View>
                   {classes.map((classItem) => (
                     <TouchableOpacity
                       key={classItem.id}
@@ -214,11 +309,11 @@ const ManageSubjects = () => {
                       </Text>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </View>
               </View>
               <View className="mb-6">
                 <Text className="text-sm font-semibold mb-2">Assign Subject Teacher</Text>
-                <ScrollView className="max-h-40">
+                <View>
                   {teachers.length > 0 ? (
                     teachers.map((teacher) => (
                       <TouchableOpacity
@@ -243,7 +338,7 @@ const ManageSubjects = () => {
                   ) : (
                     <Text className="text-gray-500 text-sm p-3">No teachers available</Text>
                   )}
-                </ScrollView>
+                </View>
               </View>
               <View className="flex-row gap-3">
                 <TouchableOpacity

@@ -1,6 +1,6 @@
-import { createUserWithEmailAndPassword, onAuthStateChanged as firebaseOnAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged as firebaseOnAuthStateChanged, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { addDoc, collection, doc, serverTimestamp as fbServerTimestamp, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
-import { auth, firestore } from './config';
+import app, { auth, firestore } from './config';
 
 const isFirestoreAvailable = !!firestore;
 
@@ -8,19 +8,21 @@ export const loginUser = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
 
-    // If Firestore is available, try to fetch additional user data, otherwise return minimal auth info
+    const authUser = userCredential.user;
+    const base = { uid: authUser.uid, email: authUser.email, emailVerified: authUser.emailVerified };
+
     if (isFirestoreAvailable) {
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', userCredential.user.uid));
+        const userDoc = await getDoc(doc(firestore, 'users', authUser.uid));
         if (userDoc.exists()) {
-          return { uid: userCredential.user.uid, email: userCredential.user.email, ...userDoc.data() };
+          return { ...base, ...userDoc.data() };
         }
       } catch (err) {
         console.warn('[authService] loginUser: could not fetch user document', err);
       }
     }
 
-    return { uid: userCredential.user.uid, email: userCredential.user.email };
+    return base;
   } catch (error) {
     console.error('[authService] loginUser error', error);
     throw error;
@@ -29,147 +31,163 @@ export const loginUser = async (email, password) => {
 
 export const registerUser = async (email, password, userData) => {
   try {
-    // For students, validate roll number exists in database
+    // Student registration (no Cloud Functions — works on free Firebase plan)
+    // 1. Create Auth user first so we are authenticated for Firestore.
+    // 2. Query students by rollNo (read allowed for any authenticated user).
+    // 3. Write users/{uid} and update student doc with uid/email (update allowed when doc.uid is null and we set uid to request.auth.uid).
     if (userData.role === 'student') {
       if (!userData.rollNo) {
         throw new Error('Roll number is required for student registration');
       }
-
+      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const uid = userCredential.user.uid;
+      // Ensure Firestore picks up the new auth token before any reads/writes
+      await new Promise((r) => setTimeout(r, 300));
       if (isFirestoreAvailable) {
-        // Check if roll number exists in students collection
-        const studentsQuery = query(
-          collection(firestore, 'students'),
-          where('rollNo', '==', userData.rollNo)
-        );
-        const studentsSnapshot = await getDocs(studentsQuery);
-        
-        if (studentsSnapshot.empty) {
-          throw new Error('Roll number not found in database. Please contact admin.');
-        }
-
-        const studentDoc = studentsSnapshot.docs[0].data();
-        // Check if student already has an account
-        if (studentDoc.uid) {
-          throw new Error('An account already exists for this roll number.');
-        }
-
-        // Update student document with uid after creating auth account
-        userData.studentDocId = studentsSnapshot.docs[0].id;
-      }
-    }
-    
-    // For teachers, validate teacher ID exists in database
-    if (userData.role === 'teacher') {
-      if (!userData.id) {
-        throw new Error('Teacher ID is required for teacher registration');
-      }
-
-      if (isFirestoreAvailable) {
-        // Check if teacher ID exists in teachers collection
-        const teachersQuery = query(
-          collection(firestore, 'teachers'),
-          where('id', '==', userData.id)
-        );
-        const teachersSnapshot = await getDocs(teachersQuery);
-        
-        if (teachersSnapshot.empty) {
-          throw new Error('Teacher ID not found in database. Please contact admin.');
-        }
-
-        const teacherDoc = teachersSnapshot.docs[0].data();
-        // Check if teacher already has an account
-        if (teacherDoc.uid) {
-          throw new Error('An account already exists for this teacher ID.');
-        }
-
-        // Store teacher document ID to update after creating auth account
-        userData.teacherDocId = teachersSnapshot.docs[0].id;
-      }
-    }
-
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-
-    const result = { uid: userCredential.user.uid, email: userCredential.user.email, ...userData };
-
-    if (isFirestoreAvailable) {
-      try {
-        // Build userDocData without undefined values (Firestore doesn't allow undefined)
-        const userDocData = {
-          name: userData.name,
-          email,
-          phone: userData.phone || '',
-          role: userData.role,
-          department: userData.department || 'DCSE',
-          createdAt: fbServerTimestamp(),
-        };
-        
-        // Only include id if it exists (for teachers/admins)
-        if (userData.id) {
-          userDocData.id = userData.id;
-        }
-        
-        // Only include rollNo if it exists (for students)
-        if (userData.rollNo) {
-          userDocData.rollNo = userData.rollNo;
-        }
-        
-        await setDoc(doc(firestore, 'users', userCredential.user.uid), userDocData);
-
-        if (userData.role === 'teacher') {
-          // Update existing teacher document with uid and email
-          if (userData.teacherDocId) {
-            await setDoc(
-              doc(firestore, 'teachers', userData.teacherDocId),
-              { 
-                uid: userCredential.user.uid, 
-                email: email,
-                updatedAt: fbServerTimestamp()
-              },
-              { merge: true }
-            );
-          } else {
-            // Fallback: create new teacher document if not found (shouldn't happen)
-            await addDoc(collection(firestore, 'teachers'), {
-              uid: userCredential.user.uid,
-              name: userData.name,
-              id: userData.id,
-              email,
-              phone: userData.phone || '',
-              department: userData.department || 'DCSE',
-              createdAt: fbServerTimestamp(),
-            });
+        try {
+          const studentsQuery = query(
+            collection(firestore, 'students'),
+            where('rollNo', '==', String(userData.rollNo).trim())
+          );
+          const studentsSnapshot = await getDocs(studentsQuery);
+          if (studentsSnapshot.empty) {
+            await deleteUser(userCredential.user);
+            throw new Error('Roll number not found in database. Please contact admin.');
           }
-        } else if (userData.role === 'admin') {
-          await addDoc(collection(firestore, 'admins'), {
-            uid: userCredential.user.uid,
+          const studentDoc = studentsSnapshot.docs[0];
+          const existing = studentDoc.data();
+          if (existing.uid) {
+            await deleteUser(userCredential.user);
+            throw new Error('An account already exists for this roll number.');
+          }
+          const userDocData = {
             name: userData.name,
-            id: userData.id,
-            email,
+            email: email.trim(),
+            phone: userData.phone || '',
+            role: 'student',
+            rollNo: userData.rollNo,
+            department: userData.department || 'DCSE',
+            createdAt: fbServerTimestamp(),
+          };
+          await setDoc(doc(firestore, 'users', uid), userDocData);
+          await setDoc(
+            doc(firestore, 'students', studentDoc.id),
+            { uid, email: email.trim(), updatedAt: fbServerTimestamp() },
+            { merge: true }
+          );
+        } catch (err) {
+          if (err.message?.includes('Roll number') || err.message?.includes('already exists')) throw err;
+          try {
+            await deleteUser(userCredential.user);
+          } catch (_) {}
+          throw err;
+        }
+      }
+      const userDoc = isFirestoreAvailable ? await getDoc(doc(firestore, 'users', uid)) : null;
+      const profile = userDoc?.exists() ? userDoc.data() : {};
+      return {
+        uid,
+        email: userCredential.user.email,
+        emailVerified: userCredential.user.emailVerified,
+        ...profile,
+      };
+    }
+
+    // Teacher registration (no extra permissions — create user first, then query teachers while authenticated)
+    if (userData.role === 'teacher') {
+      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const uid = userCredential.user.uid;
+      await new Promise((r) => setTimeout(r, 300));
+      if (isFirestoreAvailable) {
+        try {
+          const teachersQuery = query(
+            collection(firestore, 'teachers'),
+            where('email', '==', email.trim())
+          );
+          const teachersSnapshot = await getDocs(teachersQuery);
+          if (teachersSnapshot.empty) {
+            await deleteUser(userCredential.user);
+            throw new Error('Email not found in teachers list. Please contact admin to add you first.');
+          }
+          const teacherDoc = teachersSnapshot.docs[0];
+          const existing = teacherDoc.data();
+          if (existing.uid) {
+            await deleteUser(userCredential.user);
+            throw new Error('An account already exists for this email.');
+          }
+          const userDocData = {
+            name: userData.name,
+            email: email.trim(),
+            phone: userData.phone || '',
+            role: 'teacher',
+            department: userData.department || 'DCSE',
+            createdAt: fbServerTimestamp(),
+          };
+          await setDoc(doc(firestore, 'users', uid), userDocData);
+          await setDoc(
+            doc(firestore, 'teachers', teacherDoc.id),
+            { uid, email: email.trim(), updatedAt: fbServerTimestamp() },
+            { merge: true }
+          );
+        } catch (err) {
+          if (err.message?.includes('Email not found') || err.message?.includes('already exists')) throw err;
+          try {
+            await deleteUser(userCredential.user);
+          } catch (_) {}
+          throw err;
+        }
+      }
+      const userDoc = isFirestoreAvailable ? await getDoc(doc(firestore, 'users', uid)) : null;
+      const profile = userDoc?.exists() ? userDoc.data() : {};
+      return {
+        uid,
+        email: userCredential.user.email,
+        emailVerified: userCredential.user.emailVerified,
+        ...profile,
+      };
+    }
+
+    // Admin registration — create user first, then write users + admins (any authenticated user can add to admins for self-registration)
+    if (userData.role === 'admin') {
+      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const uid = userCredential.user.uid;
+      await new Promise((r) => setTimeout(r, 300));
+      if (isFirestoreAvailable) {
+        try {
+          await setDoc(doc(firestore, 'users', uid), {
+            name: userData.name,
+            email: email.trim(),
+            phone: userData.phone || '',
+            role: 'admin',
+            department: userData.department || 'DCSE',
+            createdAt: fbServerTimestamp(),
+          });
+          await addDoc(collection(firestore, 'admins'), {
+            uid,
+            name: userData.name,
+            email: email.trim(),
             phone: userData.phone || '',
             department: userData.department || 'DCSE',
             createdAt: fbServerTimestamp(),
           });
-        } else if (userData.role === 'student') {
-          // Update existing student document with uid and email
-          if (userData.studentDocId) {
-            await setDoc(
-              doc(firestore, 'students', userData.studentDocId),
-              { 
-                uid: userCredential.user.uid, 
-                email: email,
-                updatedAt: fbServerTimestamp()
-              },
-              { merge: true }
-            );
-          }
+        } catch (err) {
+          try {
+            await deleteUser(userCredential.user);
+          } catch (_) {}
+          throw err;
         }
-      } catch (err) {
-        console.warn('[authService] registerUser: could not write user data to Firestore', err);
-        throw err;
       }
+      const userDoc = isFirestoreAvailable ? await getDoc(doc(firestore, 'users', uid)) : null;
+      const profile = userDoc?.exists() ? userDoc.data() : {};
+      return {
+        uid,
+        email: userCredential.user.email,
+        emailVerified: userCredential.user.emailVerified,
+        ...profile,
+      };
     }
 
-    return result;
+    return null;
   } catch (error) {
     console.error('[authService] registerUser error', error);
     throw error;
@@ -190,5 +208,29 @@ export const getCurrentUser = () => {
 
 export const onAuthStateChanged = (callback) => {
   return firebaseOnAuthStateChanged(auth, callback);
+};
+
+/** Send password reset email (forgot password). Firebase sends the email; user gets a link in inbox. */
+export const sendPasswordReset = async (email) => {
+  if (!email || !email.trim()) {
+    throw new Error('Please enter your email address.');
+  }
+  await sendPasswordResetEmail(auth, email.trim());
+};
+
+/** Resend email verification link to the current user (for verify-email screen). */
+export const resendVerificationEmail = async () => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('You must be signed in to resend the verification email.');
+  if (user.emailVerified) throw new Error('Your email is already verified.');
+  await sendEmailVerification(user);
+};
+
+/** Reload current user from Firebase (e.g. after user clicked verification link). */
+export const reloadAuthUser = async () => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  await user.reload();
+  return auth.currentUser;
 };
 

@@ -85,7 +85,6 @@ export const exportToExcel = async (data, filename) => {
 export const generateStudentTemplate = () => {
   return [
     {
-      'Student ID': 'STU001',
       'Name': 'John Doe',
       'Email': 'john.doe@example.com',
       'Phone': '1234567890',
@@ -98,7 +97,6 @@ export const generateStudentTemplate = () => {
 export const generateTeacherTemplate = () => {
   return [
     {
-      'Teacher ID': 'TCH001',
       'Name': 'Jane Smith',
       'Email': 'jane.smith@example.com',
       'Phone': '1234567890',

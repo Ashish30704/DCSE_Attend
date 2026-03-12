@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useErrorModal } from '../components/ErrorModal';
 import { GlassCard, GradientBackground, PrimaryButton, ScrollContainer } from '../components/ui/kit';
 import { addDocument, deleteDocument, getCollection, queryCollection, updateDocument } from '../firebase/firestoreService';
@@ -49,7 +49,6 @@ const ManageClasses = () => {
   const [editingClass, setEditingClass] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    section: '',
     inchargeTeacherId: '',
     inchargeTeacherUid: '',
   });
@@ -76,19 +75,35 @@ const ManageClasses = () => {
     }
   };
 
+  // Teachers who are already incharge of another class (exclude current editing class so current incharge stays selectable)
+  const inchargeByTeacherId = React.useMemo(() => {
+    const map = new Map<string, string>();
+    classes.forEach((c) => {
+      const tid = c.inchargeTeacherId || c.inchargeTeacherUid || c.teacherId;
+      if (tid && c.id !== editingClass?.id) map.set(tid, c.name || c.id);
+    });
+    return map;
+  }, [classes, editingClass?.id]);
+
   const handleSave = async () => {
-    if (!formData.name || !formData.section) {
-      showError('Please fill in class name and section');
+    if (!formData.name?.trim()) {
+      showError('Please enter class name');
       return;
+    }
+    const tid = formData.inchargeTeacherId || formData.inchargeTeacherUid;
+    if (tid) {
+      const otherClass = inchargeByTeacherId.get(tid);
+      if (otherClass) {
+        showError(`This teacher is already incharge of "${otherClass}". Each class can have only one incharge, and a teacher can be incharge of only one class.`);
+        return;
+      }
     }
 
     try {
       const classData = {
-        name: formData.name,
-        section: formData.section,
+        name: formData.name.trim(),
         inchargeTeacherId: formData.inchargeTeacherId || null,
         inchargeTeacherUid: formData.inchargeTeacherUid || null,
-        // keep legacy field populated for backwards compatibility
         teacherId: formData.inchargeTeacherId || null,
       };
 
@@ -99,7 +114,7 @@ const ManageClasses = () => {
       }
       setModalVisible(false);
       setEditingClass(null);
-      setFormData({ name: '', section: '', inchargeTeacherId: '', inchargeTeacherUid: '' });
+      setFormData({ name: '', inchargeTeacherId: '', inchargeTeacherUid: '' });
       loadData();
     } catch (error) {
       showError('Failed to save class');
@@ -110,7 +125,6 @@ const ManageClasses = () => {
     setEditingClass(classItem);
     setFormData({
       name: classItem.name || '',
-      section: classItem.section || '',
       inchargeTeacherId: classItem.inchargeTeacherId || classItem.teacherId || '',
       inchargeTeacherUid: classItem.inchargeTeacherUid || '',
     });
@@ -149,21 +163,21 @@ const ManageClasses = () => {
 
       for (const row of data) {
         try {
+          const name = row['Name'] ?? row['name'];
+          const email = row['Email'] ?? row['email'];
+          const rollNo = String(row['Roll Number'] ?? row['rollNo'] ?? row['Roll No'] ?? '');
+          if (!name || !email || !rollNo) {
+            errors.push(`Row missing required fields (Name, Email, Roll Number): ${name || 'Unknown'}`);
+            continue;
+          }
           const studentData = {
-            studentId: row['Student ID'] || row['studentId'] || row['id'] || '',
-            name: row['Name'] || row['name'] || '',
-            email: row['Email'] || row['email'] || '',
-            phone: row['Phone'] || row['phone'] || '',
-            rollNo: String(row['Roll Number'] || row['rollNo'] || row['Roll No'] || ''),
+            name,
+            email,
+            phone: row['Phone'] ?? row['phone'] ?? '',
+            rollNo,
             classId: classId,
             sessionId: currentSession?.id,
           };
-
-          if (!studentData.studentId || !studentData.name || !studentData.email || !studentData.rollNo) {
-            errors.push(`Row missing required fields: ${studentData.name || 'Unknown'}`);
-            continue;
-          }
-
           await addDocument('students', studentData);
           imported++;
         } catch (error: any) {
@@ -200,13 +214,12 @@ const ManageClasses = () => {
       );
 
       const exportData = studentsList.map(student => ({
-        'Student ID': student.studentId,
         'Name': student.name,
         'Email': student.email,
         'Phone': student.phone || '',
         'Roll Number': student.rollNo || student.rollNumber || '',
       }));
-      await exportToExcel(exportData, `class_${classItem.name}_${classItem.section}_students.xlsx`);
+      await exportToExcel(exportData, `class_${classItem.name}_students.xlsx`);
       showSuccess('Students exported successfully');
     } catch (error) {
       showError('Failed to export students');
@@ -257,7 +270,7 @@ const ManageClasses = () => {
           title="Add New Class"
           onPress={() => {
             setEditingClass(null);
-            setFormData({ name: '', section: '', inchargeTeacherId: '', inchargeTeacherUid: '' });
+            setFormData({ name: '', inchargeTeacherId: '', inchargeTeacherUid: '' });
             setModalVisible(true);
           }}
         />
@@ -272,7 +285,7 @@ const ManageClasses = () => {
               <View className="flex-row justify-between items-start mb-3">
                 <View className="flex-1">
                   <Text className="text-lg font-semibold text-gray-900 mb-1">
-                    {classItem.name} • {classItem.section}
+                    {classItem.name}
                   </Text>
                   <Text className="text-gray-600 text-sm mb-1">
                     Incharge: <Text className="font-semibold text-gray-900">{getTeacherName(resolveInchargeId(classItem))}</Text>
@@ -312,12 +325,13 @@ const ManageClasses = () => {
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 max-h-[80%]">
-            <Text className="text-2xl font-bold mb-4">
-              {editingClass ? 'Edit Class' : 'Add Class'}
-            </Text>
-            <ScrollView>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-end">
+          <View className="flex-1 justify-end bg-black/50">
+            <View className="bg-white rounded-t-3xl p-6 max-h-[80%]">
+              <Text className="text-2xl font-bold mb-4">
+                {editingClass ? 'Edit Class' : 'Add Class'}
+              </Text>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View className="mb-4">
                 <Text className="text-sm font-semibold mb-2">Class Name *</Text>
                 <TextInput
@@ -327,33 +341,32 @@ const ManageClasses = () => {
                   className="border border-gray-300 rounded-lg p-3"
                 />
               </View>
-              <View className="mb-4">
-                <Text className="text-sm font-semibold mb-2">Section *</Text>
-                <TextInput
-                  value={formData.section}
-                  onChangeText={(text) => setFormData({ ...formData, section: text })}
-                  placeholder="e.g., A, B, C"
-                  className="border border-gray-300 rounded-lg p-3"
-                />
-              </View>
               <View className="mb-6">
                 <Text className="text-sm font-semibold mb-2">Assign Class Incharge</Text>
                 <ScrollView className="max-h-40">
                   {teachers.length > 0 ? (
-                    teachers.map((teacher) => (
-                      <TouchableOpacity
-                        key={teacher.id || teacher.uid}
-                        onPress={() => handleSelectIncharge(teacher)}
-                        className={`p-3 mb-2 rounded-lg border-2 ${
-                          formData.inchargeTeacherId === (teacher.id || teacher.uid)
-                            ? 'bg-blue-100 border-blue-600'
-                            : 'bg-gray-50 border-gray-300'
-                        }`}
-                      >
-                        <Text className="font-semibold">{teacher.name}</Text>
-                        <Text className="text-sm text-gray-600">{teacher.email}</Text>
-                      </TouchableOpacity>
-                    ))
+                    teachers.map((teacher) => {
+                      const tid = teacher.id || teacher.uid;
+                      const alreadyInchargeOf = inchargeByTeacherId.get(tid);
+                      const isDisabled = !!alreadyInchargeOf;
+                      const isSelected = formData.inchargeTeacherId === tid;
+                      return (
+                        <TouchableOpacity
+                          key={tid}
+                          onPress={() => !isDisabled && handleSelectIncharge(teacher)}
+                          disabled={isDisabled}
+                          className={`p-3 mb-2 rounded-lg border-2 ${
+                            isSelected ? 'bg-blue-100 border-blue-600' : isDisabled ? 'bg-gray-100 border-gray-200 opacity-80' : 'bg-gray-50 border-gray-300'
+                          }`}
+                        >
+                          <Text className="font-semibold">{teacher.name}</Text>
+                          <Text className="text-sm text-gray-600">{teacher.email}</Text>
+                          {isDisabled ? (
+                            <Text className="text-xs text-amber-600 mt-1">Already incharge of another class</Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })
                   ) : (
                     <Text className="text-gray-500 text-sm p-3">No teachers available</Text>
                   )}
@@ -373,9 +386,10 @@ const ManageClasses = () => {
                   <Text className="text-white text-center font-semibold">Save</Text>
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+              </ScrollView>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </GradientBackground>
   );

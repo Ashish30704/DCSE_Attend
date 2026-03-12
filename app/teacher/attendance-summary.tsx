@@ -19,7 +19,6 @@ type RootState = {
 
 type StudentDoc = {
   id?: string;
-  studentId: string;
   name: string;
   email?: string;
   phone?: string;
@@ -37,11 +36,13 @@ type ClassDoc = {
 
 type AttendanceDoc = {
   classId?: string;
+  presentStudents?: string[];
   students?: Record<string, boolean>;
 };
 
 type StudentAttendance = {
-  studentId: string;
+  key: string;
+  rollNo: string;
   name: string;
   classId: string;
   classLabel: string;
@@ -82,16 +83,19 @@ const AttendanceSummaryScreen = () => {
 
       classes.forEach((cls) => {
         if (!cls?.id) return;
-        const label = cls.section ? `${cls.name} • ${cls.section}` : cls.name;
+        const label = cls.name || '';
         classMap.set(cls.id, label);
       });
       
-      // Initialize stats from students collection
+      const getKey = (s: StudentDoc) => String(s?.rollNo ?? s?.rollNumber ?? s?.id ?? '').trim();
+      // Initialize stats from students collection (key by rollNo or doc id)
       allStudents.forEach((student) => {
-        if (!student.studentId || !student.classId) return;
+        const key = getKey(student);
+        if (!key || !student.classId) return;
         const classLabel = classMap.get(student.classId) || 'Unknown Class';
-        initialStats.set(student.studentId, {
-          studentId: student.studentId,
+        initialStats.set(key, {
+          key,
+          rollNo: String(student.rollNo ?? student.rollNumber ?? ''),
           name: student.name,
           classId: student.classId,
           classLabel: classLabel,
@@ -102,27 +106,16 @@ const AttendanceSummaryScreen = () => {
       });
 
       attendanceRecords.forEach((record) => {
-        // Handle new format with presentStudents/absentStudents arrays
         if (record.presentStudents && Array.isArray(record.presentStudents)) {
-          const presentRollNos = new Set(record.presentStudents);
+          const presentRollNos = new Set(record.presentStudents.map(String));
           allStudents.forEach((student) => {
-            const rollNo = student.rollNo || student.rollNumber;
-            if (!rollNo || !student.studentId) return;
-            const stat = initialStats.get(student.studentId);
+            const key = getKey(student);
+            const rollNo = student.rollNo ?? student.rollNumber;
+            if (!key || !rollNo) return;
+            const stat = initialStats.get(key);
             if (!stat) return;
             stat.total += 1;
-            if (presentRollNos.has(rollNo)) {
-              stat.presents += 1;
-            }
-            stat.percent = stat.total ? Math.round((stat.presents / stat.total) * 100) : 0;
-          });
-        } else {
-          // Legacy format with students object
-          Object.entries(record.students || {}).forEach(([studentId, present]) => {
-            const stat = initialStats.get(studentId);
-            if (!stat) return;
-            stat.total += 1;
-            if (present) stat.presents += 1;
+            if (presentRollNos.has(String(rollNo))) stat.presents += 1;
             stat.percent = stat.total ? Math.round((stat.presents / stat.total) * 100) : 0;
           });
         }
@@ -276,7 +269,7 @@ const AttendanceSummaryScreen = () => {
                       <View className="bg-rose-50 rounded-2xl border border-rose-100">
                         {lowStudents.map((student) => (
                           <View
-                            key={student.studentId}
+                            key={student.key}
                             className="flex-row items-center justify-between px-4 py-3 border-b border-rose-100 last:border-b-0"
                           >
                             <View className="flex-row items-center gap-3">
@@ -300,7 +293,7 @@ const AttendanceSummaryScreen = () => {
                     <View className="gap-2">
                       {students.map((student) => (
                         <View
-                          key={student.studentId}
+                          key={student.key}
                           className={`flex-row items-center justify-between px-4 py-3 rounded-2xl border ${
                             student.percent < 75 ? 'bg-rose-50 border-rose-200' : 'bg-blue-50 border-blue-200'
                           }`}

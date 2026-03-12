@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
+import { DepartmentLogo } from '../components/DepartmentLogo';
 import { useErrorModal } from '../components/ErrorModal';
 import { GlassCard, GradientBackground, ScrollContainer, StatCard } from '../components/ui/kit';
 import { loginUser, logoutUser } from '../firebase/authService';
@@ -142,6 +143,13 @@ const AdminDashboard = () => {
       route: '/admin/students',
       accent: 'bg-purple-100 text-purple-700',
     },
+    {
+      title: 'Attendance Summary',
+      description: 'View attendance by class and subject',
+      icon: 'bar-chart-outline',
+      route: '/teacher/attendance-summary',
+      accent: 'bg-sky-100 text-sky-700',
+    },
   ];
 
   if (loading) {
@@ -157,34 +165,36 @@ const AdminDashboard = () => {
   return (
     <GradientBackground padded={false}>
       <ScrollContainer contentClassName="px-4 sm:px-6 pt-6 pb-12 gap-5">
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-1">
-            <Text className="text-xs text-gray-500 uppercase tracking-wide mb-1">Welcome back</Text>
-            <Text className="text-2xl font-bold text-gray-900">{user?.name || 'Admin'}</Text>
-            <Text className="text-sm text-gray-600 mt-1">Manage academic operations and system settings</Text>
+        <View className="mb-4">
+          <View className="flex-row items-center justify-between gap-3">
+            <DepartmentLogo size={64} />
+            <View className="flex-1 min-w-0">
+              <Text className="text-xs text-neutral-500 uppercase tracking-wide mb-0.5">Welcome back</Text>
+              <Text className="text-xl font-bold text-neutral-900" numberOfLines={1}>{user?.name || 'Admin'}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={handleLogout}
+              className="rounded-xl border border-neutral-200 px-4 py-2.5 bg-white flex-row items-center gap-2 shrink-0"
+            >
+              <Ionicons name="log-out-outline" size={16} color="#374151" />
+              <Text className="text-sm font-semibold text-neutral-700">Logout</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            onPress={handleLogout}
-            className="rounded-xl border border-gray-300 px-4 py-2.5 bg-white flex-row items-center gap-2"
-          >
-            <Ionicons name="log-out-outline" size={16} color="#374151" />
-            <Text className="text-sm font-semibold text-gray-700">Logout</Text>
-          </TouchableOpacity>
         </View>
 
         {currentSession && (
-          <GlassCard className="p-4 bg-blue-50 border-blue-200">
-            <View className="flex-row items-center justify-between">
-              <View className="flex-1">
-                <Text className="text-xs text-blue-600 font-semibold mb-1 uppercase tracking-wide">Current Session</Text>
-                <Text className="text-lg font-bold text-gray-900">{currentSession.name}</Text>
-                <Text className="text-xs text-gray-600 mt-1">
+          <GlassCard className="p-4 border-primary-200 bg-primary-50/50">
+            <View className="flex-row items-center justify-between gap-3">
+              <View className="flex-1 min-w-0">
+                <Text className="text-xs text-primary-600 font-semibold mb-1 uppercase tracking-wide">Current Session</Text>
+                <Text className="text-lg font-bold text-neutral-900" numberOfLines={1}>{currentSession.name}</Text>
+                <Text className="text-xs text-neutral-500 mt-1">
                   Started: {currentSession.startDate ? new Date(currentSession.startDate).toLocaleDateString() : 'N/A'}
                 </Text>
               </View>
               <TouchableOpacity
                 onPress={() => setShowResetModal(true)}
-                className="bg-red-600 px-4 py-2 rounded-lg flex-row items-center gap-2"
+                className="rounded-xl bg-red-600 px-4 py-2.5 flex-row items-center gap-2 shrink-0"
               >
                 <Ionicons name="refresh-outline" size={16} color="#fff" />
                 <Text className="text-white text-sm font-semibold">Reset</Text>
@@ -193,12 +203,34 @@ const AdminDashboard = () => {
           </GlassCard>
         )}
 
+        {/* Personal info: compact block */}
+        <GlassCard className="p-4">
+          <View className="flex-row">
+          <View className="flex-1">
+              <Text className="text-xs text-neutral-500 mb-0.5">Department</Text>
+              <Text className="text-sm font-semibold text-neutral-900" numberOfLines={1}>{(user as any)?.department || 'DCSE'}</Text>
+            </View>
+            <View className="flex-1">
+              <Text className="text-xs text-neutral-500 mb-0.5">Role</Text>
+              <Text className="text-sm font-semibold text-neutral-900">Admin</Text>
+            </View>
+          </View>
+          <View className="flex-row mt-3 pt-3 border-t border-neutral-100">
+            
+            <View className="flex-1 pr-3">
+              <Text className="text-xs text-neutral-500 mb-0.5">Email</Text>
+              <Text className="text-sm font-semibold text-neutral-900" numberOfLines={1}>{user?.email || '—'}</Text>
+            </View>
+          </View>
+        </GlassCard>
+
+        {/* Non-personal: StatCards */}
         <View className="flex-row flex-wrap gap-3">
           <StatCard
             label="Teachers"
             value={stats.teachers}
             icon={<Ionicons name="person-outline" size={20} color="#2563eb" />}
-            accent="bg-blue-50"
+            accent="bg-primary-50"
           />
           <StatCard
             label="Classes"
@@ -219,19 +251,17 @@ const AdminDashboard = () => {
             <GlassCard key={card.title} className="p-4">
               <TouchableOpacity
                 onPress={() => router.push(card.route)}
-                activeOpacity={0.7}
-                className="flex-row items-center justify-between"
+                activeOpacity={0.8}
+                className="flex-row items-center justify-between gap-3"
               >
-                <View className="flex-row items-center gap-3 flex-1">
-                  <View className={`w-10 h-10 rounded-xl items-center justify-center ${card.accent}`}>
-                    <Ionicons name={card.icon} size={20} color="#374151" />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-base font-semibold text-gray-900">{card.title}</Text>
-                    <Text className="text-sm text-gray-500">{card.description}</Text>
-                  </View>
+                <View className={`w-10 h-10 rounded-xl items-center justify-center shrink-0 ${card.accent}`}>
+                  <Ionicons name={card.icon} size={20} color="#374151" />
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+                <View className="flex-1 min-w-0">
+                  <Text className="text-base font-semibold text-neutral-900">{card.title}</Text>
+                  <Text className="text-sm text-neutral-500 mt-0.5">{card.description}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#a1a1aa" />
               </TouchableOpacity>
             </GlassCard>
           ))}

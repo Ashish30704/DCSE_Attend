@@ -31,7 +31,7 @@ type RootState = {
 };
 
 type Student = {
-  studentId: string;
+  id?: string;
   name: string;
   rollNo?: string;
   rollNumber?: string;
@@ -183,10 +183,7 @@ const AttendanceExportScreen = () => {
         throw new Error('No attendance records found for this month');
       }
 
-      const studentMap = new Map<string, Student>();
-      students.forEach((s) => {
-        if (s?.studentId) studentMap.set(s.studentId, s);
-      });
+      const getRollNo = (s: Student) => String(s?.rollNo ?? s?.rollNumber ?? '').trim();
 
       // Create a map of dates to attendance records
       const dateMap = new Map<string, AttendanceDoc>();
@@ -203,39 +200,18 @@ const AttendanceExportScreen = () => {
       const rows: any[] = [];
       
       students.forEach((student) => {
-        const rollNo = student.rollNo || student.rollNumber || '';
+        const rollNo = getRollNo(student);
         const row: any = {
           'Roll Number': rollNo,
-          'Student ID': student.studentId,
           'Name': student.name || '',
         };
 
-        // Add attendance status for each date
         dates.forEach((date) => {
           const record = dateMap.get(date);
-          
-          if (record) {
-            // Check new structure first (presentStudents/absentStudents)
-            if (record.presentStudents || record.absentStudents) {
-              const isPresent = record.presentStudents?.includes(rollNo) || false;
-              const isAbsent = record.absentStudents?.includes(rollNo) || false;
-              
-              if (isPresent) {
-                row[date] = 'P';
-              } else if (isAbsent) {
-                row[date] = 'A';
-              } else {
-                row[date] = '-';
-              }
-            } 
-            // Legacy support: check old structure (students object)
-            else if (record.students) {
-              const studentId = student.studentId;
-              const isPresent = record.students[studentId] === true;
-              row[date] = isPresent ? 'P' : 'A';
-            } else {
-              row[date] = '-';
-            }
+          if (record?.presentStudents || record?.absentStudents) {
+            const isPresent = record.presentStudents?.includes(rollNo) ?? false;
+            const isAbsent = record.absentStudents?.includes(rollNo) ?? false;
+            row[date] = isPresent ? 'P' : isAbsent ? 'A' : '-';
           } else {
             row[date] = '-';
           }
@@ -249,9 +225,8 @@ const AttendanceExportScreen = () => {
       }
 
       const safeClass = (classData?.name || 'class').replace(/[^\w\-]+/g, '_');
-      const safeSection = (classData?.section || '').replace(/[^\w\-]+/g, '_');
       const safeSubject = (subjectData?.name || 'subject').replace(/[^\w\-]+/g, '_');
-      const filename = `attendance_${safeClass}_${safeSection}_${safeSubject}_${month}.xlsx`;
+      const filename = `attendance_${safeClass}_${safeSubject}_${month}.xlsx`;
 
       await exportToExcel(rows, filename);
       showSuccess('Attendance exported successfully');

@@ -35,7 +35,7 @@ const ROLE_ROUTES: Record<string, string[]> = {
 };
 
 // Public routes that don't require authentication
-const PUBLIC_ROUTES = ['index', 'register'];
+const PUBLIC_ROUTES = ['index', 'register', 'forgot-password'];
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [initializing, setInitializing] = useState(true);
@@ -56,15 +56,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
       if (authUser) {
         try {
-          // Fetch user data from Firestore
           const userData = await getDocument('users', authUser.uid);
-          
           if (userData && userData.role) {
-            // Sync to Redux on every auth state change
-            // This ensures Redux is always in sync with Firebase Auth
-            dispatch(setUser({ uid: authUser.uid, ...userData }));
+            dispatch(setUser({
+              uid: authUser.uid,
+              ...userData,
+              emailVerified: authUser.emailVerified,
+            }));
           } else {
-            // User document not found or missing role
             console.warn('[AuthGate] User document missing or invalid');
             dispatch(clearUser());
           }
@@ -91,54 +90,36 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, []); // Run only once on mount
 
-  // Handle route protection based on user role
+  // Handle route protection based on user role and email verification
   useEffect(() => {
-    // Don't navigate during initialization
     if (initializing || loading) return;
 
-    const inAuthGroup = segments[0] === '(auth)' || PUBLIC_ROUTES.includes(segments[0]);
+    const currentRoute = segments[0];
+    const inPublic = segments[0] === '(auth)' || PUBLIC_ROUTES.includes(currentRoute || '');
 
     if (!user || !role) {
-      // Not authenticated - redirect to login
-      if (!inAuthGroup) {
-        router.replace('/');
-      }
-    } else {
-      // Authenticated - check role-based access
-      const currentRoute = segments[0];
-      const allowedRoutes = ROLE_ROUTES[role] || [];
-      const isAllowedRoute = allowedRoutes.some((allowed) => 
-        currentRoute?.startsWith(allowed)
-      );
+      if (!inPublic) router.replace('/');
+      return;
+    }
 
-      // Check if user is trying to access a protected route
-      if (!PUBLIC_ROUTES.includes(currentRoute || '')) {
-        if (!isAllowedRoute && !inAuthGroup) {
-          // User role doesn't match route - redirect to their dashboard
-          console.warn(`[AuthGate] Unauthorized access: ${role} trying to access ${currentRoute}`);
-          if (role === 'admin') {
-            router.replace('/admin/dashboard');
-          } else if (role === 'teacher') {
-            router.replace('/teacher/dashboard');
-          } else if (role === 'student') {
-            router.replace('/student/dashboard');
-          } else {
-            router.replace('/');
-          }
-          return;
-        }
+    const allowedRoutes = ROLE_ROUTES[role] || [];
+    const isAdminOnAttendanceSummary = role === 'admin' && currentRoute === 'teacher' && segments[1] === 'attendance-summary';
+    const isAllowedRoute = isAdminOnAttendanceSummary || allowedRoutes.some((r) => currentRoute?.startsWith(r));
 
-        // If on login/register page but authenticated, redirect to dashboard
-        if (inAuthGroup && PUBLIC_ROUTES.includes(currentRoute || '')) {
-          if (role === 'admin') {
-            router.replace('/admin/dashboard');
-          } else if (role === 'teacher') {
-            router.replace('/teacher/dashboard');
-          } else if (role === 'student') {
-            router.replace('/student/dashboard');
-          }
-        }
+    if (!PUBLIC_ROUTES.includes(currentRoute || '')) {
+      if (!isAllowedRoute) {
+        if (role === 'admin') router.replace('/admin/dashboard');
+        else if (role === 'teacher') router.replace('/teacher/dashboard');
+        else if (role === 'student') router.replace('/student/dashboard');
+        else router.replace('/');
+        return;
       }
+    }
+
+    if (inPublic && PUBLIC_ROUTES.includes(currentRoute || '')) {
+      if (role === 'admin') router.replace('/admin/dashboard');
+      else if (role === 'teacher') router.replace('/teacher/dashboard');
+      else if (role === 'student') router.replace('/student/dashboard');
     }
   }, [user, role, segments, initializing, loading, router]);
 
