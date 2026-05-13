@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
+import React, { memo } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -130,12 +130,13 @@ export const SectionHeading: React.FC<{
   </View>
 );
 
+/** Memoized: dashboard/stat grids re-render often; props are cheap to compare by reference. */
 export const StatCard: React.FC<{
   label: string;
   value: string | number;
   accent?: string;
   icon?: React.ReactNode;
-}> = ({ label, value, accent = "bg-primary-50", icon }) => (
+}> = memo(({ label, value, accent = "bg-primary-50", icon }) => (
   <GlassCard className="p-3 flex-1 min-w-[140px]">
     <View className="flex-row items-center gap-3">
       {<View
@@ -163,7 +164,7 @@ export const StatCard: React.FC<{
       </View>
     </View>
   </GlassCard>
-);
+));
 
 export const PillTag: React.FC<{
   text: string;

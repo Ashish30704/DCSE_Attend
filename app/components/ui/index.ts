@@ -4,6 +4,7 @@ export { Input } from './Input';
 export { Header } from './Header';
 export { EmptyState } from './EmptyState';
 export { Loader } from './Loader';
+export { ScreenSkeleton } from './ScreenSkeleton';
 export { Modal } from './Modal';
 export {
   GradientBackground,

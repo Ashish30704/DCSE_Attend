@@ -104,13 +104,18 @@ export const getUserPushToken = async (userId) => {
   try {
     const userTokenRef = doc(firestore, 'userPushTokens', userId);
     const tokenDoc = await getDoc(userTokenRef);
-    
+
     if (tokenDoc.exists()) {
       return tokenDoc.data().expoPushToken || null;
     }
     return null;
   } catch (error) {
-    console.error('[pushNotifications] Error getting user push token:', error);
+    const code = error?.code || '';
+    if (code === 'permission-denied' || code === 'missing-or-insufficient-permissions') {
+      console.warn('[pushNotifications] Cannot read push token (Firestore rules):', userId);
+    } else {
+      console.warn('[pushNotifications] Error getting user push token:', error?.message || error);
+    }
     return null;
   }
 };

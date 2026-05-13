@@ -53,6 +53,9 @@
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "enableHermes": true
           }
         }
       ],

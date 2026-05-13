@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -15,7 +14,8 @@ import {
   GradientBackground,
   ScrollContainer,
 } from "../components/ui/kit";
-import { queryCollection } from "../firebase/firestoreService";
+import { ScreenSkeleton } from "../components/ui";
+import { queryCollection, queryCollectionWithLimit } from "../firebase/firestoreService";
 import { getCurrentSession } from "../firebase/sessionService";
 
 type Student = {
@@ -56,7 +56,7 @@ const StudentAttendanceScreen = () => {
 
   useEffect(() => {
     loadData();
-  }, [user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (selectedSubject && studentData) {
@@ -113,8 +113,9 @@ const StudentAttendanceScreen = () => {
       const currentSession = await getCurrentSession();
       const rollNo = studentData.rollNo || studentData.rollNumber;
 
-      const attendanceList = (await queryCollection(
+      const attendanceList = (await queryCollectionWithLimit(
         "attendance",
+        1000,
         where("classId", "==", studentData.classId),
         where("subjectId", "==", subjectId),
         where("sessionId", "==", currentSession?.id),
@@ -138,20 +139,21 @@ const StudentAttendanceScreen = () => {
     }
   };
 
-  const getAttendanceStatus = (record: AttendanceDoc): "present" | "absent" => {
-    const rollNo = studentData?.rollNo || studentData?.rollNumber || "";
-    if (record.presentStudents?.includes(rollNo)) {
-      return "present";
-    }
-    return "absent";
-  };
+  const getAttendanceStatus = useCallback(
+    (record: AttendanceDoc): "present" | "absent" => {
+      const rollNo = studentData?.rollNo || studentData?.rollNumber || "";
+      if (record.presentStudents?.includes(rollNo)) {
+        return "present";
+      }
+      return "absent";
+    },
+    [studentData?.rollNo, studentData?.rollNumber],
+  );
 
   if (loading) {
     return (
       <GradientBackground>
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#2563eb" />
-        </View>
+        <ScreenSkeleton rows={6} />
       </GradientBackground>
     );
   }
@@ -238,16 +240,13 @@ const StudentAttendanceScreen = () => {
                 {attendanceRecords.map((record) => {
                   const status = getAttendanceStatus(record);
                   return (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerClassName={`flex-row flex-1 items-center p-3 rounded-lg border ${
+                    <View
+                      key={record.id}
+                      className={`my-1 flex-row flex-1 items-center p-3 rounded-lg border ${
                         status === "present"
                           ? "bg-green-50 border-green-200"
                           : "bg-rose-50 border-rose-200"
                       }`}
-                      key={record.id}
-                      className="my-1"
                     >
                       <Text className="flex-1 text-gray-900 font-medium">
                         {record.date
@@ -276,7 +275,7 @@ const StudentAttendanceScreen = () => {
                           {status === "present" ? "Present" : "Absent"}
                         </Text>
                       </View>
-                    </ScrollView>
+                    </View>
                   );
                 })}
               </View>

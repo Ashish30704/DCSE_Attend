@@ -9,14 +9,18 @@
  * - No auth listeners in individual screens
  *
  * Icon fonts (Ionicons) are preloaded here so they render correctly on web
- * (Firebase Hosting); without this, icons show as cross placeholders.
+ * (Firebase Hosting). We also call Ionicons.loadFont() on web because
+ * useFonts can fail or race on static export; rendering before the font
+ * loads shows cross/tofu placeholders.
  */
 
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { View } from "react-native";
+import { useEffect, useState } from "react";
+import { Platform, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Provider } from "react-redux";
 import "../global.css";
@@ -24,13 +28,47 @@ import { AuthGate } from "./components/AuthGate";
 import { ErrorModalProvider } from "./components/ErrorModal";
 import { store } from "./redux/store";
 
+void SplashScreen.preventAutoHideAsync();
+
 const layoutStyle = { flex: 1, maxWidth: "100%", overflow: "hidden" as const };
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({ ...Ionicons.font });
+  const [webFontFallback, setWebFontFallback] = useState(false);
 
-  if (!fontsLoaded && !fontError) {
-    return null;
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    let cancelled = false;
+    Ionicons.loadFont()
+      .then(() => {
+        if (!cancelled) setWebFontFallback(true);
+      })
+      .catch((e) => {
+        console.warn("[RootLayout] Ionicons.loadFont:", e);
+        if (!cancelled) setWebFontFallback(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (fontError) {
+      console.warn("[RootLayout] useFonts reported an error:", fontError);
+    }
+  }, [fontError]);
+
+  const fontsReady =
+    fontsLoaded || (Platform.OS === "web" && webFontFallback);
+
+  useEffect(() => {
+    if (fontsReady) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontsReady]);
+
+  if (!fontsReady) {
+    return <View style={{ flex: 1, backgroundColor: "#f8fafc" }} />;
   }
 
   return (
@@ -40,7 +78,7 @@ export default function RootLayout() {
           <AuthGate>
             <ErrorModalProvider>
               <StatusBar style="dark" />
-              <Stack screenOptions={{ headerShown: false }}>
+              <Stack screenOptions={{ headerShown: false, freezeOnBlur: true }}>
                 {/* Public routes */}
                 <Stack.Screen name="index" options={{ title: "Home" }} />
                 <Stack.Screen name="register" options={{ title: "Register" }} />

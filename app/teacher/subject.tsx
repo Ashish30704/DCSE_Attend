@@ -1,7 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { BackHandler, Platform, ScrollView, Switch, Text, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  BackHandler,
+  Platform,
+  ScrollView,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSelector } from "react-redux";
 import { useErrorModal } from "../components/ErrorModal";
 import { EmptyState, Header, Loader, Modal } from "../components/ui";
@@ -56,8 +64,8 @@ const SubjectScreen = () => {
   }, [subjectId]);
 
   useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+    if (Platform.OS === "web") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (modalOpen) {
         setModalOpen(false);
         return true;
@@ -292,78 +300,82 @@ const SubjectScreen = () => {
       <Modal
         visible={modalOpen}
         onRequestClose={() => setModalOpen(false)}
-        contentClassName="p-6 flex-1 min-h-0"
+        contentClassName="p-4 flex-1 min-h-0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 absolute w-full"
         fillHeight
       >
-        <View className="flex-1 min-h-0">
-        <Text className="text-xl font-bold text-neutral-900 mb-4">
-          {editing ? "Edit assignment" : "New assignment"}
-        </Text>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          className="flex-1"
-          contentContainerStyle={{ paddingBottom: 16 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Input
-            label="Assignment name *"
-            value={form.assignmentName}
-            onChangeText={(t) => setForm((f) => ({ ...f, assignmentName: t }))}
-            placeholder="e.g. Quiz 1"
-          />
-          <Input
-            label="Total marks *"
-            value={form.totalMarks}
-            onChangeText={(t) => setForm((f) => ({ ...f, totalMarks: t }))}
-            placeholder="10"
-            keyboardType="numeric"
-          />
-          <Input
-            label="Description (optional)"
-            value={form.description}
-            onChangeText={(t) => setForm((f) => ({ ...f, description: t }))}
-            placeholder="Instructions or notes"
-            multiline
-          />
-          <Input
-            label="Due date (optional)"
-            value={form.dueDate}
-            onChangeText={(t) => setForm((f) => ({ ...f, dueDate: t }))}
-            placeholder="YYYY-MM-DD"
-          />
-          <View className="mb-4 flex-row items-center justify-between">
-            <Text className="text-sm font-medium text-neutral-700">
-              Marks visible to students
-            </Text>
-            <Switch
-              value={form.marksVisible}
-              onValueChange={(v) => setForm((f) => ({ ...f, marksVisible: v }))}
-              trackColor={{ false: "#e4e4e7", true: "#93c5fd" }}
-              thumbColor="#2563eb"
+        <View className="flex-1 min-h-0 w-full">
+          <Text className="text-xl font-bold text-neutral-900 mb-4">
+            {editing ? "Edit assignment" : "New assignment"}
+          </Text>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            className="flex-1"
+            contentContainerStyle={{ paddingBottom: 16 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Input
+              label="Assignment name *"
+              value={form.assignmentName}
+              onChangeText={(t) =>
+                setForm((f) => ({ ...f, assignmentName: t }))
+              }
+              placeholder="e.g. Quiz 1"
             />
+            <Input
+              label="Total marks *"
+              value={form.totalMarks}
+              onChangeText={(t) => setForm((f) => ({ ...f, totalMarks: t }))}
+              placeholder="10"
+              keyboardType="numeric"
+            />
+            <Input
+              label="Description (optional)"
+              value={form.description}
+              onChangeText={(t) => setForm((f) => ({ ...f, description: t }))}
+              placeholder="Instructions or notes"
+              multiline
+            />
+            <Input
+              label="Due date (optional)"
+              value={form.dueDate}
+              onChangeText={(t) => setForm((f) => ({ ...f, dueDate: t }))}
+              placeholder="YYYY-MM-DD"
+            />
+            <View className="mb-4 flex-row items-center justify-between">
+              <Text className="text-sm font-medium text-neutral-700">
+                Marks visible to students
+              </Text>
+              <Switch
+                value={form.marksVisible}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, marksVisible: v }))
+                }
+                trackColor={{ false: "#e4e4e7", true: "#93c5fd" }}
+                thumbColor="#2563eb"
+              />
+            </View>
+          </ScrollView>
+          <View className="flex-row gap-3 pt-2 border-t border-neutral-100">
+            <TouchableOpacity
+              onPress={() => setModalOpen(false)}
+              className="flex-1 bg-neutral-100 py-3.5 rounded-xl min-h-[44px] justify-center"
+              activeOpacity={0.8}
+            >
+              <Text className="text-center font-semibold text-neutral-700">
+                Cancel
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={saving}
+              className="flex-1 bg-primary-600 py-3.5 rounded-xl min-h-[44px] justify-center"
+              activeOpacity={0.8}
+            >
+              <Text className="text-white text-center font-semibold">
+                {saving ? "Saving…" : "Save"}
+              </Text>
+            </TouchableOpacity>
           </View>
-        </ScrollView>
-        <View className="flex-row gap-3 pt-2 border-t border-neutral-100">
-          <TouchableOpacity
-            onPress={() => setModalOpen(false)}
-            className="flex-1 bg-neutral-100 py-3.5 rounded-xl min-h-[44px] justify-center"
-            activeOpacity={0.8}
-          >
-            <Text className="text-center font-semibold text-neutral-700">
-              Cancel
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={saving}
-            className="flex-1 bg-primary-600 py-3.5 rounded-xl min-h-[44px] justify-center"
-            activeOpacity={0.8}
-          >
-            <Text className="text-white text-center font-semibold">
-              {saving ? "Saving…" : "Save"}
-            </Text>
-          </TouchableOpacity>
-        </View>
         </View>
       </Modal>
     </GradientBackground>

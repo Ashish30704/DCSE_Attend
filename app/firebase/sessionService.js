@@ -54,7 +54,10 @@ export const getAllSessions = async () => {
   }
 };
 
-// Reset session - archive current and create new
+/**
+ * Archive the active session and create a new active session (Firestore only).
+ * Does not delete attendance, classes, or users.
+ */
 export const resetSession = async (newSessionName, adminUid) => {
   if (!isFirestoreAvailable) {
     console.warn('[sessionService] Firestore not available, cannot reset session');
@@ -62,14 +65,12 @@ export const resetSession = async (newSessionName, adminUid) => {
   }
 
   try {
-    // Get current active session
     const currentSession = await getCurrentSession();
-    
+
     if (!currentSession.id) {
       throw new Error('No active session found');
     }
 
-    // Archive current session
     await setDoc(
       doc(firestore, 'sessions', currentSession.id),
       {
@@ -77,10 +78,9 @@ export const resetSession = async (newSessionName, adminUid) => {
         archivedAt: serverTimestamp(),
         archivedBy: adminUid,
       },
-      { merge: true }
+      { merge: true },
     );
 
-    // Create new session
     const newSession = {
       name: newSessionName || `Session ${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
       startDate: new Date().toISOString().split('T')[0],

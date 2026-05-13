@@ -20,6 +20,19 @@ service cloud.firestore {
             || s.teacherId == request.auth.uid);
     }
 
+    // Role from users/{uid} (for push-token reads by teachers sending notifications).
+    function userRole(uid) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(uid))
+        ? get(/databases/$(database)/documents/users/$(uid)).data.role
+        : null;
+    }
+
+    function isTeacherOrAdminUid(uid) {
+      let r = userRole(uid);
+      return r == 'teacher' || r == 'admin';
+    }
+
     // Users: own doc only
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
@@ -61,8 +74,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Owner may write; owner or teacher/admin may read (teachers need student tokens to send Expo pushes).
     match /userPushTokens/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isTeacherOrAdminUid(request.auth.uid));
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
     match /admins/{id} {
       allow read, write: if request.auth != null;
@@ -71,16 +87,27 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Server / Admin SDK only (session reset lock, audit trail, archives)
+    match /system/{document=**} {
+      allow read, write: if false;
+    }
+    match /auditLogs/{id} {
+      allow read, write: if false;
+    }
+    match /sessionArchives/{id} {
+      allow read, write: if false;
+    }
+
     // Subjects: read/write for authenticated; edit subject name/teacher in app
     match /subjects/{subjectId} {
       allow read, write: if request.auth != null;
       match /assignments/{assignmentId} {
         allow read: if request.auth != null;
         allow create, update, delete: if request.auth != null && isSubjectTeacher(subjectId);
-        // submissionId should be student's auth uid so students can read their own
+        // Any authenticated user may read submissions (app filters by student id / uid).
+        // Writes remain restricted to the subject teacher.
         match /submissions/{submissionId} {
-          allow read: if request.auth != null
-            && (isSubjectTeacher(subjectId) || request.auth.uid == submissionId);
+          allow read: if request.auth != null;
           allow create, update, delete: if request.auth != null && isSubjectTeacher(subjectId);
         }
       }

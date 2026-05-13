@@ -94,6 +94,19 @@ export async function getSubmissions(subjectId, assignmentId) {
 }
 
 /**
+ * Pick this student's submission from a list (doc id is auth uid and/or students/{id} roster id).
+ * @param {Array<{ id: string, marksObtained?: number }>} submissions
+ * @param {{ uid?: string, id?: string }} studentRow
+ * @param {string} authUid
+ * @returns {{ id: string, marksObtained?: number } | null}
+ */
+export function pickSubmissionForStudent(submissions, studentRow, authUid) {
+  if (!submissions?.length) return null;
+  const ids = new Set([authUid, studentRow?.uid, studentRow?.id].filter(Boolean));
+  return submissions.find((s) => ids.has(s.id)) || null;
+}
+
+/**
  * Get one student's submission (for student view).
  * @param {string} subjectId
  * @param {string} assignmentId

@@ -1,102 +1,219 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { where } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import { FlashList } from "@shopify/flash-list";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { where } from "firebase/firestore";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useSelector } from "react-redux";
+import { useErrorModal } from "../components/ErrorModal";
+import { EmptyState, Header, Loader } from "../components/ui";
 import {
-  ActivityIndicator,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { useSelector } from 'react-redux';
-import { useErrorModal } from '../components/ErrorModal';
-import { EmptyState, Header, Loader } from '../components/ui';
-import { GlassCard, GradientBackground, PrimaryButton, ScrollContainer } from '../components/ui/kit';
-import { getSubmissions, setSubmission, updateAssignment } from '../firebase/assignmentService';
-import { getCurrentSession } from '../firebase/sessionService';
-import { queryCollection } from '../firebase/firestoreService';
+  GlassCard,
+  GradientBackground,
+  PrimaryButton,
+} from "../components/ui/kit";
+import {
+  getSubmissions,
+  setSubmission,
+  updateAssignment,
+} from "../firebase/assignmentService";
+import { queryCollection } from "../firebase/firestoreService";
+import { getCurrentSession } from "../firebase/sessionService";
 
-type Student = { id: string; uid?: string; name?: string; rollNo?: string; rollNumber?: string };
+type Student = {
+  id: string;
+  uid?: string;
+  name?: string;
+  rollNo?: string;
+  rollNumber?: string;
+};
+
+/** Virtualized row — FlashList recycles views; keep stable handlers via onChangeKey. */
+type MarkRowProps = {
+  student: Student;
+  inputKey: string;
+  rollNo: string;
+  value: string;
+  onChangeKey: (key: string, text: string) => void;
+};
+
+const MarkRow = memo(function MarkRow({
+  student: s,
+  inputKey,
+  rollNo,
+  value,
+  onChangeKey,
+}: MarkRowProps) {
+  const onChangeText = useCallback(
+    (t: string) => {
+      onChangeKey(inputKey, t);
+    },
+    [onChangeKey, inputKey],
+  );
+
+  return (
+    <GlassCard className="p-5 flex-row items-center justify-between gap-3 mb-3">
+      <View className="flex-1 min-w-0">
+        <Text className="font-semibold text-neutral-900">{s.name}</Text>
+        <Text className="text-neutral-500 text-sm">
+          Roll: {rollNo}
+          {!s.uid
+            ? " • Not linked yet — marks are saved and shown when marks are published"
+            : null}
+        </Text>
+      </View>
+      <View className="w-24">
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder="Marks"
+          keyboardType="decimal-pad"
+          className="border border-neutral-200 rounded-xl bg-neutral-50 px-3 py-2.5 text-center text-neutral-900"
+          placeholderTextColor="#a1a1aa"
+        />
+      </View>
+    </GlassCard>
+  );
+});
 
 const AssignmentMarksScreen = () => {
-  const { classId, subjectId, assignmentId, assignmentName } = useLocalSearchParams<{
-    classId: string;
-    subjectId: string;
-    assignmentId: string;
-    assignmentName?: string;
-  }>();
+  const { classId, subjectId, assignmentId, assignmentName } =
+    useLocalSearchParams<{
+      classId: string;
+      subjectId: string;
+      assignmentId: string;
+      assignmentName?: string;
+    }>();
   const router = useRouter();
   const { showError, showSuccess } = useErrorModal();
   const { user } = useSelector((state: any) => state.auth);
   const [students, setStudents] = useState<Student[]>([]);
-  const [submissions, setSubmissions] = useState<Record<string, { marksObtained?: number }>>({});
   const [marksInput, setMarksInput] = useState<Record<string, string>>({});
+  const marksRef = useRef(marksInput);
+  marksRef.current = marksInput;
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!classId || !subjectId || !assignmentId) return;
+    let cancelled = false;
     (async () => {
       setLoading(true);
       try {
         const session = await getCurrentSession();
-        const list = await queryCollection(
-          'students',
-          where('classId', '==', classId),
-          where('sessionId', '==', session?.id)
-        ) as Student[];
+        const list = (await queryCollection(
+          "students",
+          where("classId", "==", classId),
+          where("sessionId", "==", session?.id),
+        )) as Student[];
+        if (cancelled) return;
         setStudents(list);
         const subs = await getSubmissions(subjectId, assignmentId);
-        const byId: Record<string, { marksObtained?: number }> = {};
-        // Key marks by student.uid (so student can read their doc) or student.id for display
         const nextMarks: Record<string, string> = {};
         list.forEach((student) => {
           const key = student.uid || student.id;
-          const sub = subs.find((s) => s.id === student.uid || s.id === student.id);
+          const sub = subs.find(
+            (s) => s.id === student.uid || s.id === student.id,
+          );
           if (sub) {
-            byId[key] = { marksObtained: sub.marksObtained };
-            nextMarks[key] = String(sub.marksObtained ?? '');
+            nextMarks[key] = String(sub.marksObtained ?? "");
           }
         });
-        setSubmissions(byId);
         setMarksInput((prev) => ({ ...prev, ...nextMarks }));
       } catch (e) {
-        showError(e instanceof Error ? e.message : 'Failed to load.');
+        if (!cancelled) {
+          showError(e instanceof Error ? e.message : "Failed to load.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [classId, subjectId, assignmentId]);
 
-  const handleSave = async () => {
+  const onMarksKeyChange = useCallback((key: string, text: string) => {
+    setMarksInput((prev) => ({ ...prev, [key]: text }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
     if (!subjectId || !assignmentId || !user?.uid) return;
+    const snapshot = marksRef.current;
     setSaving(true);
     try {
-      // Use only student.uid so students can read their submission (Firestore rule: submissionId == auth.uid)
       let saved = 0;
       for (const student of students) {
-        const uid = student.uid;
-        if (!uid) continue; // Skip students without uid; they wouldn't see marks anyway
-        const raw = marksInput[uid]?.trim();
-        const num = raw === '' ? undefined : parseFloat(raw);
+        const submissionDocId = student.uid || student.id;
+        if (!submissionDocId) continue;
+        const raw = snapshot[submissionDocId]?.trim();
+        const num = raw === "" ? undefined : parseFloat(raw);
         if (num === undefined || isNaN(num)) continue;
-        await setSubmission(subjectId, assignmentId, uid, {
+        await setSubmission(subjectId, assignmentId, submissionDocId, {
           marksObtained: num,
           evaluatedBy: user.uid,
         });
         saved++;
       }
-      // Make marks visible to students when teacher saves
       await updateAssignment(subjectId, assignmentId, { marksVisible: true });
-      showSuccess(saved > 0 ? 'Marks saved and published.' : 'No marks to save.');
+      showSuccess(
+        saved > 0 ? "Marks saved and published." : "No marks to save.",
+      );
     } catch (e) {
-      showError(e instanceof Error ? e.message : 'Failed to save.');
+      showError(e instanceof Error ? e.message : "Failed to save.");
     } finally {
       setSaving(false);
     }
-  };
+  }, [subjectId, assignmentId, user?.uid, students, showSuccess, showError]);
+
+  const decodedName = useMemo(
+    () =>
+      assignmentName ? decodeURIComponent(assignmentName) : "Assignment",
+    [assignmentName],
+  );
+
+  const listHeader = useMemo(
+    () => (
+      <View className="px-2 sm:px-4 lg:px-6 pt-4 pb-2 max-w-wide self-stretch w-full">
+        <Header
+          title="Enter marks"
+          subtitle={decodedName}
+          onBack={() => router.back()}
+        />
+      </View>
+    ),
+    [decodedName, router],
+  );
+
+  const listFooter = useMemo(
+    () => (
+      <View className="px-2 sm:px-4 lg:px-6 pb-12 pt-2 max-w-wide self-stretch w-full">
+        <PrimaryButton
+          title="Save marks"
+          onPress={handleSave}
+          loading={saving}
+        />
+      </View>
+    ),
+    [handleSave, saving],
+  );
+
+  const renderItem = useCallback(
+    ({ item: s }: { item: Student }) => {
+      const key = s.uid || s.id;
+      const rollNo = s.rollNo ?? s.rollNumber ?? "";
+      return (
+        <MarkRow
+          student={s}
+          inputKey={key}
+          rollNo={rollNo}
+          value={marksInput[key] ?? ""}
+          onChangeKey={onMarksKeyChange}
+        />
+      );
+    },
+    [marksInput, onMarksKeyChange],
+  );
 
   if (!classId || !subjectId || !assignmentId) {
     return (
@@ -111,51 +228,56 @@ const AssignmentMarksScreen = () => {
     );
   }
 
-  const decodedName = assignmentName ? decodeURIComponent(assignmentName) : 'Assignment';
+  if (loading) {
+    return (
+      <GradientBackground padded={false}>
+        <View className="px-2 sm:px-4 lg:px-6 pt-4 max-w-wide w-full self-center">
+          <Header
+            title="Enter marks"
+            subtitle={decodedName}
+            onBack={() => router.back()}
+          />
+          <Loader message="Loading students…" />
+        </View>
+      </GradientBackground>
+    );
+  }
+
+  if (students.length === 0) {
+    return (
+      <GradientBackground padded={false}>
+        <View className="px-2 sm:px-4 lg:px-6 pt-4 max-w-wide w-full self-center">
+          <Header
+            title="Enter marks"
+            subtitle={decodedName}
+            onBack={() => router.back()}
+          />
+          <GlassCard className="p-8 mt-4">
+            <EmptyState
+              icon="people-outline"
+              title="No students"
+              description="No students in this class."
+            />
+          </GlassCard>
+        </View>
+      </GradientBackground>
+    );
+  }
 
   return (
     <GradientBackground padded={false}>
-      <ScrollContainer contentClassName="px-4 sm:px-6 lg:px-8 pt-4 pb-12 gap-5 max-w-wide mx-auto">
-        <Header title="Enter marks" subtitle={decodedName} onBack={() => router.back()} />
-
-        {loading ? (
-          <Loader message="Loading students…" />
-        ) : students.length === 0 ? (
-          <GlassCard className="p-8">
-            <EmptyState icon="people-outline" title="No students" description="No students in this class." />
-          </GlassCard>
-        ) : (
-          <>
-            {students.map((s) => {
-              const key = s.uid || s.id;
-              const rollNo = s.rollNo ?? s.rollNumber ?? '';
-              const canReceiveMarks = !!s.uid;
-              return (
-                <GlassCard key={s.id} className="p-5 flex-row items-center justify-between gap-3">
-                  <View className="flex-1 min-w-0">
-                    <Text className="font-semibold text-neutral-900">{s.name}</Text>
-                    <Text className="text-neutral-500 text-sm">
-                      Roll: {rollNo}
-                      {!canReceiveMarks && ' • Account not linked (marks will not appear for student)'}
-                    </Text>
-                  </View>
-                  <View className="w-24">
-                    <TextInput
-                      value={marksInput[key] ?? ''}
-                      onChangeText={(t) => setMarksInput((prev) => ({ ...prev, [key]: t }))}
-                      placeholder="Marks"
-                      keyboardType="decimal-pad"
-                      className="border border-neutral-200 rounded-xl bg-neutral-50 px-3 py-2.5 text-center text-neutral-900"
-                      placeholderTextColor="#a1a1aa"
-                    />
-                  </View>
-                </GlassCard>
-              );
-            })}
-            <PrimaryButton title="Save marks" onPress={handleSave} loading={saving} />
-          </>
-        )}
-      </ScrollContainer>
+      <FlashList
+        data={students}
+        keyExtractor={(s) => s.id}
+        estimatedItemSize={96}
+        // Re-bind cells when marks map updates (teacher typing).
+        extraData={marksInput}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+        renderItem={renderItem}
+        contentContainerStyle={{ paddingBottom: 8 }}
+        style={{ flex: 1 }}
+      />
     </GradientBackground>
   );
 };

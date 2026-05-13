@@ -6,10 +6,48 @@
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const { runAcademicSessionReset } = require('./academicSessionReset');
+
 admin.initializeApp();
 
 const firestore = admin.firestore();
 const auth = admin.auth();
+
+/**
+ * Wrap reset so uncaught errors are returned with a visible message.
+ * Callable code `internal` often hides the message on clients; we use failed-precondition instead.
+ */
+async function startNewAcademicSessionHandler(data, context) {
+  try {
+    return await runAcademicSessionReset(data, context);
+  } catch (err) {
+    if (err instanceof functions.https.HttpsError) {
+      const code = String(err.code || '');
+      if (code === 'internal' || code === 'functions/internal' || code.endsWith('/internal')) {
+        const hint =
+          (typeof err.details === 'string' && err.details) ||
+          (err.message && err.message !== 'INTERNAL' ? err.message : '') ||
+          'The operation failed. Open Firebase Console → Functions → Logs and filter by startNewAcademicSession.';
+        throw new functions.https.HttpsError('failed-precondition', `Session reset failed: ${hint}`);
+      }
+      throw err;
+    }
+    const msg = (err && err.message) || String(err);
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      `Session reset failed: ${String(msg).slice(0, 450)}`,
+    );
+  }
+}
+
+/**
+ * Full academic session reset: wipes attendance, classes, subjects (incl. assignments),
+ * students, teachers, non-admin users docs, push tokens; rotates sessions; revokes and
+ * deletes non-admin Firebase Auth users. Callable only (Admin SDK).
+ */
+exports.startNewAcademicSession = functions
+  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .https.onCall(startNewAcademicSessionHandler);
 
 /**
  * Student registration: lookup by rollNo (no client Firestore read), create auth user, update student doc.

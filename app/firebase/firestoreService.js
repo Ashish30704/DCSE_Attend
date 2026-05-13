@@ -9,6 +9,7 @@ import {
   serverTimestamp as fbServerTimestamp,
   getDoc,
   getDocs,
+  limit,
   query,
   setDoc,
   updateDoc,
@@ -122,6 +123,36 @@ export const queryCollection = async (collectionName, ...queryConstraints) => {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error('[firestoreService] queryCollection error', err);
+    throw err;
+  }
+};
+
+/** Max documents Firestore allows in a single limit() call. */
+const FIRESTORE_MAX_LIMIT = 1000;
+
+/**
+ * Same as queryCollection but caps read size for large collections (cost + memory).
+ * Use for unbounded lists where the UI only needs recent / bounded data.
+ * @param {string} collectionName
+ * @param {number} maxDocs - 1..1000
+ * @param {...import('firebase/firestore').QueryConstraint} queryConstraints
+ */
+export const queryCollectionWithLimit = async (collectionName, maxDocs, ...queryConstraints) => {
+  if (!isFirestoreAvailable) {
+    toMock('queryCollectionWithLimit', collectionName, queryConstraints);
+    return [];
+  }
+  const cap = Math.min(
+    FIRESTORE_MAX_LIMIT,
+    Math.max(1, Math.floor(Number(maxDocs) || 500)),
+  );
+  try {
+    const colRef = collection(firestore, collectionName);
+    const q = query(colRef, ...queryConstraints, limit(cap));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error('[firestoreService] queryCollectionWithLimit error', err);
     throw err;
   }
 };

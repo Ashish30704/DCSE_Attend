@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { where } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { DepartmentLogo } from '../components/DepartmentLogo';
 import { useErrorModal } from '../components/ErrorModal';
+import { ScreenSkeleton } from '../components/ui';
 import { GlassCard, GradientBackground, ScrollContainer, StatCard } from '../components/ui/kit';
 import { logoutUser } from '../firebase/authService';
-import { queryCollection } from '../firebase/firestoreService';
+import { queryCollection, queryCollectionWithLimit } from '../firebase/firestoreService';
 import { getCurrentSession } from '../firebase/sessionService';
 import { clearUser } from '../redux/slices/authSlice';
 
@@ -46,7 +47,6 @@ type ClassDoc = {
 const StudentDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ totalSubjects: 0, attendanceRecords: 0 });
-  const [subjects, setSubjects] = useState<SubjectDoc[]>([]);
   const [studentData, setStudentData] = useState<Student | null>(null);
   const [classData, setClassData] = useState<ClassDoc | null>(null);
   const router = useRouter();
@@ -61,17 +61,7 @@ const StudentDashboard = () => {
     }
   }, [role, loading, router]);
 
-  useEffect(() => {
-    // Guard: Only load data if user is authenticated and is student
-    if (user?.uid && role === 'student') {
-      loadData();
-      registerPushNotifications();
-    } else {
-      setLoading(false);
-    }
-  }, [user?.uid, role]);
-
-  const registerPushNotifications = async () => {
+  const registerPushNotifications = useCallback(async () => {
     if (!user?.uid || role !== 'student') return;
     try {
       const { registerForPushNotificationsAsync } = await import('../utils/pushNotifications');
@@ -84,9 +74,9 @@ const StudentDashboard = () => {
     } catch (error) {
       console.error('[StudentDashboard] Error registering for push notifications:', error);
     }
-  };
+  }, [user?.uid, role]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!user?.uid || role !== 'student') {
       setLoading(false);
       return;
@@ -140,17 +130,19 @@ const StudentDashboard = () => {
           'subjects',
           where('classId', '==', student.classId)
         ) as SubjectDoc[];
-        setSubjects(subjectsList);
-        setStats(prev => ({ ...prev, totalSubjects: subjectsList.length }));
+        setStats((prev) => ({ ...prev, totalSubjects: subjectsList.length }));
       }
 
       const rollNo = student.rollNo || student.rollNumber || (user as any).rollNo;
       if (rollNo && student.classId) {
-        const attendanceList = await queryCollection(
+        // Cap reads: dashboard only needs an approximate count (scalable vs full session history).
+        const ATTENDANCE_CAP = 1000;
+        const attendanceList = (await queryCollectionWithLimit(
           'attendance',
+          ATTENDANCE_CAP,
           where('classId', '==', student.classId),
-          where('sessionId', '==', currentSession?.id)
-        ) as AttendanceDoc[];
+          where('sessionId', '==', currentSession?.id),
+        )) as AttendanceDoc[];
 
         const studentAttendance = attendanceList.filter(att => {
           const present = att.presentStudents?.includes(String(rollNo)) || false;
@@ -165,9 +157,18 @@ const StudentDashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, role]);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    if (user?.uid && role === 'student') {
+      void loadData();
+      void registerPushNotifications();
+    } else {
+      setLoading(false);
+    }
+  }, [user?.uid, role, loadData, registerPushNotifications]);
+
+  const handleLogout = useCallback(() => {
     showConfirm({
       title: 'Logout',
       message: 'Are you sure you want to logout?',
@@ -178,14 +179,18 @@ const StudentDashboard = () => {
         router.replace('/');
       },
     });
-  };
+  }, [showConfirm, dispatch, router]);
+
+  const classLine = useMemo(() => {
+    if (classData) return `${classData.name} ${classData.section || ''}`.trim();
+    if (studentData?.classId) return 'Loading…';
+    return 'Not assigned';
+  }, [classData, studentData?.classId]);
 
   if (loading) {
     return (
       <GradientBackground>
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#2563eb" />
-        </View>
+        <ScreenSkeleton rows={5} />
       </GradientBackground>
     );
   }
@@ -232,7 +237,7 @@ const StudentDashboard = () => {
         <View className="flex-row flex-wrap gap-3">
           <StatCard
             label="Class"
-            value={classData ? `${classData.name} ${classData.section || ''}`.trim() : (studentData?.classId ? 'Loading…' : 'Not assigned')}
+            value={classLine}
             icon={<Ionicons name="school-outline" size={20} color="#2563eb" />}
             accent="bg-primary-50"
           />
