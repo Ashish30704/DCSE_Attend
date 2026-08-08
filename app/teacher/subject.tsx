@@ -272,7 +272,7 @@ const SubjectScreen = () => {
                   className="rounded-xl border border-neutral-200 px-4 py-2.5 bg-white"
                 >
                   <Text className="text-neutral-700 text-sm font-semibold">
-                    Enter marks
+                    Enter Marks
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
